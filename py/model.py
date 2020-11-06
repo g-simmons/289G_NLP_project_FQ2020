@@ -1,5 +1,5 @@
 # this file is dedicated toward holding the actual model
-import torch.nn as nn
+import torch
 
 
 def main():
@@ -7,8 +7,8 @@ def main():
     vocab_size = len(vocab_dict)
 
     dimension = 256  # from page 6 of the paper
-    vocab_to_hidden_table = nn.Embedding(vocab_size, dimension)
+    vocab_to_hidden_table = torch.nn.Embedding(vocab_size, dimension)
 
-    # vocab_to_hidden_table([0, 1])  <-- this is an example of how to get index 0 and 1's embeddings
+    # result = vocab_to_hidden_table(torch.LongTensor([0, 1])) <-- example of how to get index 0 and 1's embeddings
 
 main()
