@@ -2,9 +2,11 @@ import sys
 sys.path.append('../lib/BioInfer_software_1.0.1/')
 from BIParser import BIParser
 
+# NOTE: this file relies on Python 2.7
 
 # reads in the BioInfer corpus, creates its vocabulary, and converts the vocabulary into a dictionary
-# dictionary include "UNK", which represents unknown tokens
+# dictionary is stored in a file called vocab_dict.txt
+# dictionary includes "UNK", which represents unknown tokens
 def create_vocab_dictionary():
     parser = BIParser()
     with open('../data/BioInfer_corpus_1.1.1.xml', 'r') as f:
@@ -25,5 +27,3 @@ def create_vocab_dictionary():
 
 
 create_vocab_dictionary()
-
-
