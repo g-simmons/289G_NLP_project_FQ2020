@@ -54,7 +54,7 @@ def main():
     vector_dim = 256  # from page 6 of the paper
 
     the_model = Model(vocab_dict, vector_dim, vector_dim)
-    print(the_model.forward(['the', 'a', 'b']))  # example usage
+    print(the_model.forward(training_sentences[0]))  # example usage
     return 0
 
 
