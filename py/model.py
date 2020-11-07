@@ -1,14 +1,33 @@
 # this file is dedicated toward holding the actual model
 import torch
 
+vocab_dict = eval(open('vocab_dict.txt', 'r').read())
+vocab_size = len(vocab_dict)
+
+dimension = 256  # from page 6 of the paper
+vocab_to_hidden_table = torch.nn.Embedding(vocab_size, dimension)
+
+
+# accepts a list of tokens as input and returns a list of embedding vectors, one vector per token
+# i-th embedding vector corresponds to the i-th token
+def get_embeddings(token_list):
+    index_list = []
+    for token in token_list:
+        # if the token exists in the vocabulary
+        if token in vocab_dict:
+            index_list.append(vocab_dict[token])
+
+        # if the token does not exist in the vocabulary
+        else:
+            index_list.append(vocab_dict[u'UNK'])
+
+    return vocab_to_hidden_table(torch.LongTensor(index_list))
+
 
 def main():
-    vocab_dict = eval(open('vocab_dict.txt', 'r').read())
-    vocab_size = len(vocab_dict)
+    print(get_embeddings(['the', 'a', 'b']))  # example usage of function
 
-    dimension = 256  # from page 6 of the paper
-    vocab_to_hidden_table = torch.nn.Embedding(vocab_size, dimension)
+    return 0
 
-    # result = vocab_to_hidden_table(torch.LongTensor([0, 1])) <-- example of how to get index 0 and 1's embeddings
 
 main()
