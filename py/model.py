@@ -4,8 +4,8 @@ import torch
 vocab_dict = eval(open('vocab_dict.txt', 'r').read())
 vocab_size = len(vocab_dict)
 
-dimension = 256  # from page 6 of the paper
-vocab_to_hidden_table = torch.nn.Embedding(vocab_size, dimension)
+hidden_vec_dim = 256  # from page 6 of the paper
+vocab_to_hidden_table = torch.nn.Embedding(vocab_size, hidden_vec_dim)
 
 
 # accepts a list of tokens as input and returns a list of embedding vectors, one vector per token
