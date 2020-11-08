@@ -21,7 +21,7 @@ class Model(nn.Module):
         self.embedding_layer = nn.Embedding(self.vocab_size, self.embedding_dim)
         self.blstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, bidirectional=True, num_layers=1)
 
-    # accepts a list of tokens as input and returns a list of embedding vectors, one vector per token
+    # accepts a sentence as input and returns a list of embedding vectors, one vector per token
     # i-th embedding vector corresponds to the i-th token
     def get_embeddings(self, sentence):
         token_list = sentence.split()
