@@ -3,10 +3,16 @@ import torch
 from torch import nn
 from sklearn.model_selection import train_test_split
 
+# NOTES FROM PAPER
+# The final fully connected layer is 512 × 1024 × 2.
+# We use Adadelta [31] as the optimizer with learning rate = 1.0.
+# The batch size is 8.
+
 
 class Model(nn.Module):
     def __init__(self, vocab_dict, embedding_dim, hidden_dim):
         super(Model, self).__init__()
+
         self.vocab_dict = vocab_dict
         self.vocab_size = len(vocab_dict)
         self.embedding_dim = embedding_dim
@@ -17,7 +23,9 @@ class Model(nn.Module):
 
     # accepts a list of tokens as input and returns a list of embedding vectors, one vector per token
     # i-th embedding vector corresponds to the i-th token
-    def get_embeddings(self, token_list):
+    def get_embeddings(self, sentence):
+        token_list = sentence.split()
+
         index_list = []
         for token in token_list:
             # if the token exists in the vocabulary
@@ -34,7 +42,9 @@ class Model(nn.Module):
     # TO BE EDITED WHEN MORE LAYERS ARE ADDED
     def forward(self, sentence):
         embedded_sentence = self.get_embeddings(sentence)
-        blstm_out, _ = self.blstm(embedded_sentence.view(len(sentence), 1, -1))
+        # since bi-lstm's hidden vector is actually 2 concatenated vectors, it will be 2x as long (512)
+        blstm_out, _ = self.blstm(embedded_sentence.view(embedded_sentence.shape[0], 1, -1))
+
         return blstm_out  # placeholder until we add more layers
 
 
