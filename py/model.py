@@ -13,10 +13,10 @@ class Model(nn.Module):
     def __init__(self, vocab_dict, embedding_dim, hidden_dim):
         super(Model, self).__init__()
 
-        self.vocab_dict = vocab_dict
-        self.vocab_size = len(vocab_dict)
-        self.embedding_dim = embedding_dim
-        self.hidden_dim = hidden_dim
+        self.vocab_dict = vocab_dict        # vocabulary dictionary; converts tokens to indices
+        self.vocab_size = len(vocab_dict)   # vocabulary size
+        self.embedding_dim = embedding_dim  # size of embedding vector
+        self.hidden_dim = hidden_dim        # size of lstm hidden vector; blstm's is 2x
 
         self.embedding_layer = nn.Embedding(self.vocab_size, self.embedding_dim)
         self.blstm = nn.LSTM(input_size=embedding_dim, hidden_size=hidden_dim, bidirectional=True, num_layers=1)

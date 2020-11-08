@@ -1,5 +1,5 @@
 import sys
-sys.path.append('../lib/BioInfer_software_1.0.1/')
+sys.path.append('../lib/BioInfer_software_1.0.1_Python3/')
 from BIParser import BIParser
 
 # NOTE: this file relies on Python 2.7
@@ -38,5 +38,5 @@ def create_text_sentences():
             file.write(str(s.getText()) + '\n')
 
 
-#create_vocab_dictionary()
+create_vocab_dictionary()
 create_text_sentences()
