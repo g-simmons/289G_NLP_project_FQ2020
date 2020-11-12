@@ -1,0 +1,2 @@
+ENTITY_PREFIX = 'e-'
+PREDICATE_PREFIX = 'p-'

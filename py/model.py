@@ -30,6 +30,8 @@ from sklearn.model_selection import train_test_split
 from itertools import combinations
 from collections import Counter
 
+from config import ENTITY_PREFIX, PREDICATE_PREFIX
+
 # NOTES FROM PAPER
 # The final fully connected layer is 512 × 1024 × 2.
 # We use Adadelta [31] as the optimizer with learning rate = 1.0.
@@ -206,7 +208,7 @@ class INNModel(nn.Module):
             self._generate_argsets()
 
             for argset in self.argsets:
-                key = ','.join([f"entity-{arg}" for arg in argset])
+                key = ','.join([f"{ENTITY_PREFIX}{arg}" for arg in argset])
                 if key in self.inverted_configuration.keys():
                     rels = self.inverted_configuration[key]
                     for rel in rels:
