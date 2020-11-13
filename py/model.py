@@ -14,9 +14,9 @@ Authors:
     Gabriel Simmons - https://github.com/g-simmons
 
 TODO:
-    * Loss
+    * Prediction representatino & Loss
+    * Training
     * Batched training
-    *
 
 """
 
@@ -40,12 +40,12 @@ from config import (
     VECTOR_DIM,
     HIDDEN_DIM,
     RELATION_EMBEDDING_DIM,
+    BATCH_SIZE,
 )
 
 # NOTES FROM PAPER
 # The final fully connected layer is 512 × 1024 × 2.
 # We use Adadelta [31] as the optimizer with learning rate = 1.0.
-# The batch size is 8.
 
 
 class DAGLSTMCell(nn.Module):
@@ -64,20 +64,14 @@ class DAGLSTMCell(nn.Module):
 
         self.W_ioc_hat = nn.Linear(relation_embedding_dim, 3 * hidden_dim)
         self.W_fs = nn.ModuleList(
-            [
-                nn.Linear(relation_embedding_dim, hidden_dim)
-                for j in range(max_inputs)
-            ]
+            [nn.Linear(relation_embedding_dim, hidden_dim) for j in range(max_inputs)]
         )
 
         self.U_ioc_hat = nn.Linear(
             max_inputs * hidden_dim, 3 * hidden_dim
         )  # can pad with zeros to have dynamic
         self.U_fs = nn.ModuleList(
-            [
-                nn.Linear(max_inputs * hidden_dim, hidden_dim)
-                for j in range(max_inputs)
-            ]
+            [nn.Linear(max_inputs * hidden_dim, hidden_dim) for j in range(max_inputs)]
         )
 
         self.b_ioc_hat = nn.Parameter(th.zeros(3 * hidden_dim))
@@ -93,7 +87,7 @@ class DAGLSTMCell(nn.Module):
         ioc_hat = self.W_ioc_hat(e)
         ioc_hat += self.U_ioc_hat(v)
         ioc_hat += self.b_ioc_hat
-        ioc_hat =  th.sigmoid(ioc_hat)
+        ioc_hat = th.sigmoid(ioc_hat)
         i, o, c_hat = th.chunk(ioc_hat, 3)
         i, o, c_hat = th.sigmoid(i), th.sigmoid(o), th.tanh(c_hat)
 
@@ -114,10 +108,12 @@ class INNModel(nn.Module):
 
     Parameters:
         vocab_dict (dict): The vocabulary for training, tokens to indices.
-        embedding_dim (int): The size of the embedding vector.
-        hidden_dim (int): The size of LSTM hidden vector, if bi-LSTM,
-            multilplied by 2
-
+        word_embedding_dim (int): The size of the word embedding vectors.
+        relation_embedding_dim (int): The size of the relation embedding vectors.
+        hidden_dim (int): The size of LSTM hidden vector (effectively 1/2 of the desired BiLSTM output size).
+        configuration: The task configuration
+        entity_to_idx (dict): dictionary mapping entity strings to unique integer values
+        relation_to_idx: dictionary mapping relation strings to unique integer values
     """
 
     def __init__(
@@ -161,9 +157,9 @@ class INNModel(nn.Module):
         )
 
         self.cell = DAGLSTMCell(
-            hidden_dim= 2 * self.hidden_dim,
-            relation_embedding_dim= self.relation_embedding_dim,
-            max_inputs=2
+            hidden_dim=2 * self.hidden_dim,
+            relation_embedding_dim=self.relation_embedding_dim,
+            max_inputs=2,
         )
 
         self.output_linear = nn.Sequential(
@@ -171,7 +167,7 @@ class INNModel(nn.Module):
             nn.Linear(4 * self.hidden_dim, 2),
         )
 
-    def get_embeddings(self, sentence):
+    def get_word_embeddings(self, sentence):
         """
         Accepts a sentence as input and returns a list of embedding vectors, one vector per token.
         i-th embedding vector corresponds to the i-th token
@@ -224,9 +220,7 @@ class INNModel(nn.Module):
         return inverted_configuration
 
     def _generate_argsets(self):
-        self.argsets = set(
-            [(c,) for c in self.candidates.items()]
-        )
+        self.argsets = set([(c,) for c in self.candidates.items()])
         for argset_idx in combinations(self.candidates.keys(), r=2):
             if self._argset_idx_in_configuration(argset_idx):
                 argset = tuple((c, self.candidates[c]) for c in argset_idx)
@@ -238,81 +232,74 @@ class INNModel(nn.Module):
             rels = self.inverted_configuration[key]
             for rel in rels.keys():
                 self.to_predict.append(
-                    (f"{PREDICATE_PREFIX}{rel}",
-                    self.relation_embeddings(th.tensor(self.relation_to_idx[rel])),
-                    [arg[1] for arg in argset])
+                    (
+                        f"{PREDICATE_PREFIX}{rel}",
+                        self.relation_embeddings(th.tensor(self.relation_to_idx[rel])),
+                        [arg[1] for arg in argset],
                     )
-
+                )
 
     def _argset_idx_in_configuration(self, argset_idx):
         key = ",".join([f"{ENTITY_PREFIX}{ai[1]}" for ai in argset_idx])
         return key in self.inverted_configuration.keys()
 
+    def _candidates_from_entity_names(self, entity_names, h_entities):
+        candidates = {}
+        for i, e in enumerate(zip(entity_names, h_entities)):
+            e_name = e[0]
+            h = e[1]
+            candidates[(i, f"{ENTITY_PREFIX}{e_name}")] = h
+        return candidates
+
     def forward(self, x):
         sentence, entities = x
+        embedded_sentence = self.get_word_embeddings(sentence)
 
-        # entity_indices = [self.entity_to_idx[ent[0]] for ent in entities]
-        # entity_indices = th.tensor(entity_indices)
-
-        embedded_sentence = self.get_embeddings(sentence)
-
-        # since bi-lstm's hidden vector is actually 2 concatenated vectors,
-        #   it will be 2x as long (512)
         blstm_out, _ = self.blstm(
             embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
         )
 
         h_entities = self.get_h_entities(entities, blstm_out)
-
         entity_names = [ent[0] for ent in entities]
 
-        c = self.cell.init_cell_state()
-
-        self.candidates = {}
-        for i, e in enumerate(zip(entity_names,h_entities)):
-            e_name = e[0]
-            h = e[1]
-            self.candidates[(i,f"{ENTITY_PREFIX}{e_name}")] = h
-
+        self.candidates = self._candidates_from_entity_names(entity_names, h_entities)
         new_candidates = True
-
-        self.to_predict = []
         layer = 1
-
+        self.to_predict = []
         predictions = []
+        c = self.cell.init_cell_state()
 
         while new_candidates:
             new_candidates = False
-            print(f'==Layer {layer}==')
+            print(f"==Layer {layer}==")
             self.to_predict = []
             self._generate_argsets()
             self._generate_to_predict()
 
             for tp in self.to_predict:
-                e = tp[1] # relation embedding
-                hjs = tp[2] # hidden states
+                e = tp[1]  # relation embedding
+                hjs = tp[2]  # hidden states
                 cjs = [c for _ in hjs]
-                if len(tp[2])>1: # TODO: deal with predicates with 1 argument
-                    h, c = self.cell.forward(hjs,cjs,e)
+                if len(tp[2]) > 1:  # TODO: deal with predicates with 1 argument
+                    h, c = self.cell.forward(hjs, cjs, e)
                     logits = self.output_linear(h)
                     p = F.softmax(logits)
-                    if p[0] > 0.5: #assumes 0 index is the positive class
-                        self.candidates[(len(self.candidates),tp[0])] = h
+                    if p[0] > 0.5:  # assumes 0 index is the positive class
+                        self.candidates[(len(self.candidates), tp[0])] = h
                         new_candidates = True
-                        predictions.append("a_prediction")
+                        predictions.append(
+                            "a_prediction"
+                        )  # TODO prediction representation, loss
             layer += 1
 
-        # e = self.relation_embeddings(self.relation_to_idx[relation_name])
-        # h, c = self.cell.forward(hjs, cjs, e)
-
-        positive_candidates = None
         return predictions
 
 
 def get_sentences(percent_test):
     with open("text_sentences.txt") as f:
         sentences = f.read().splitlines()
-    entities = pickle.load(
+
+    entities = pickle.load(  # TODO switch to json
         open(path.abspath(path.dirname(__file__)) + "/entities.pickle", "rb")
     )
 
@@ -343,7 +330,7 @@ def main():
         relation_to_idx,
     )
 
-    print('\n\n',train_data[0][0],'\n\n')
+    print("\n\n", train_data[0][0], "\n\n")
 
     output = model.forward(train_data[0])
 
