@@ -14,7 +14,7 @@ Authors:
     Gabriel Simmons - https://github.com/g-simmons
 
 TODO:
-    * Prediction representatino & Loss
+    * Prediction representation & Loss
     * Training
     * Batched training
 
@@ -30,7 +30,9 @@ from torch import nn
 from torch.nn import functional as F
 from sklearn.model_selection import train_test_split
 from itertools import combinations
-from collections import Counter
+from collections import Counter, namedtuple
+
+from classes import BioInferTaskConfiguration
 
 from config import (
     ENTITY_PREFIX,
@@ -102,6 +104,33 @@ class DAGLSTMCell(nn.Module):
 
         return h, c
 
+class ElementList():
+    def __init__(self,):
+        self.elements = {}
+
+    def add_element(self, element):
+        self.elements[(len(self.elements),element.name)] = element.hidden_vector
+
+    def items(self,):
+        return self.elements.items()
+
+    def keys(self,):
+        return self.elements.keys()
+
+    def get_combinations(self,r):
+        return combinations(self.keys(),r)
+
+    def __getitem__(self, key):
+        return self.elements[key]
+
+    def __repr__(self,):
+        return str(self.elements)
+
+    def __len__(self,):
+        return len(self.elements)
+
+Element = namedtuple('Element', ['name','hidden_vector'])
+PredictionCandidate = namedtuple('PredictionCandidate', ['predicate','predicate_embedding','argument_hidden_vectors'])
 
 class INNModel(nn.Module):
     """INN model configuration.
@@ -111,9 +140,9 @@ class INNModel(nn.Module):
         word_embedding_dim (int): The size of the word embedding vectors.
         relation_embedding_dim (int): The size of the relation embedding vectors.
         hidden_dim (int): The size of LSTM hidden vector (effectively 1/2 of the desired BiLSTM output size).
-        configuration: The task configuration
+        schema: The task schema
         entity_to_idx (dict): dictionary mapping entity strings to unique integer values
-        relation_to_idx: dictionary mapping relation strings to unique integer values
+        predicate_to_idx: dictionary mapping relation strings to unique integer values
     """
 
     def __init__(
@@ -122,29 +151,27 @@ class INNModel(nn.Module):
         word_embedding_dim,
         relation_embedding_dim,
         hidden_dim,
-        configuration,
+        schema,
+        inverted_schema,
         entity_to_idx,
-        relation_to_idx,
+        predicate_to_idx,
+        max_layer_height,
     ):
         super().__init__()
         self.vocab_dict = vocab_dict
         self.word_embedding_dim = word_embedding_dim
         self.hidden_dim = hidden_dim
         self.relation_embedding_dim = relation_embedding_dim
-        self.configuration = configuration
-        self.inverted_configuration = self._invert_configuration(
-            self.configuration
-        )  # probably an antipattern here :shrug:
+        self.schema = schema
+        self.inverted_schema = inverted_schema
         self.entity_to_idx = entity_to_idx
-        self.relation_to_idx = relation_to_idx
-        self.elements = None
-        self.candidates = []
-        self.to_predict = []
+        self.predicate_to_idx = predicate_to_idx
+        self.max_layer_height = max_layer_height
 
         self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
 
         self.relation_embeddings = nn.Embedding(
-            len(configuration.keys()), self.relation_embedding_dim
+            len(schema.keys()), self.relation_embedding_dim
         )
 
         self.attn_scores = nn.Linear(in_features=self.hidden_dim * 2, out_features=1)
@@ -208,48 +235,31 @@ class INNModel(nn.Module):
         h_entities = th.cat(h_entities)
         return h_entities
 
-    def _invert_configuration(self, configuration):
-        inverted_configuration = {}
+    def _get_argsets_from_candidates(self,candidates):
+        argsets = set()
+        for argset_idx in candidates.get_combinations(r=2):
+            key = tuple(sorted([a[1] for a in argset_idx]))
+            if key in self.inverted_schema.keys():
+                argset = tuple((c, candidates[c]) for c in argset_idx)
+                argsets.add(argset)
+        return argsets
 
-        for rel, argsets in configuration.items():
-            for argset in argsets:
-                if argset not in inverted_configuration.keys():
-                    inverted_configuration[argset] = Counter()
-                inverted_configuration[argset][rel] += 1
-
-        return inverted_configuration
-
-    def _generate_argsets(self):
-        self.argsets = set([(c,) for c in self.candidates.items()])
-        for argset_idx in combinations(self.candidates.keys(), r=2):
-            if self._argset_idx_in_configuration(argset_idx):
-                argset = tuple((c, self.candidates[c]) for c in argset_idx)
-                self.argsets.add(argset)
-
-    def _generate_to_predict(self):
-        for argset in self.argsets:
-            key = ",".join([f"{arg[0][1]}" for arg in argset])
-            rels = self.inverted_configuration[key]
-            for rel in rels.keys():
-                self.to_predict.append(
-                    (
-                        f"{PREDICATE_PREFIX}{rel}",
-                        self.relation_embeddings(th.tensor(self.relation_to_idx[rel])),
-                        [arg[1] for arg in argset],
+    def _generate_to_predict(self, argsets):
+        to_predict = []
+        for argset in argsets:
+            key = tuple(sorted([arg[0][1] for arg in argset]))
+            if len(key) > 1:
+                rels = self.inverted_schema[key]
+                for rel in rels.keys():
+                    prediction_candidate = PredictionCandidate(
+                            f"{PREDICATE_PREFIX}{rel}",
+                            self.relation_embeddings(th.tensor(self.predicate_to_idx[rel])),
+                            [arg[1] for arg in argset],
+                        )
+                    to_predict.append(
+                        prediction_candidate
                     )
-                )
-
-    def _argset_idx_in_configuration(self, argset_idx):
-        key = ",".join([f"{ENTITY_PREFIX}{ai[1]}" for ai in argset_idx])
-        return key in self.inverted_configuration.keys()
-
-    def _candidates_from_entity_names(self, entity_names, h_entities):
-        candidates = {}
-        for i, e in enumerate(zip(entity_names, h_entities)):
-            e_name = e[0]
-            h = e[1]
-            candidates[(i, f"{ENTITY_PREFIX}{e_name}")] = h
-        return candidates
+        return to_predict
 
     def forward(self, x):
         sentence, entities = x
@@ -259,48 +269,49 @@ class INNModel(nn.Module):
             embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
         )
 
+        entity_names = [ENTITY_PREFIX+ent[0] for ent in entities]
         h_entities = self.get_h_entities(entities, blstm_out)
-        entity_names = [ent[0] for ent in entities]
 
-        self.candidates = self._candidates_from_entity_names(entity_names, h_entities)
+        candidates = ElementList()
+        for name, hidden_vector in zip(entity_names,h_entities):
+            el = Element(name,hidden_vector)
+            candidates.add_element(el)
+
         new_candidates = True
         layer = 1
-        self.to_predict = []
         predictions = []
         c = self.cell.init_cell_state()
 
-        while new_candidates:
+        while new_candidates and layer <= self.max_layer_height:
             new_candidates = False
             print(f"==Layer {layer}==")
-            self.to_predict = []
-            self._generate_argsets()
-            self._generate_to_predict()
+            argsets = self._get_argsets_from_candidates(candidates)
+            to_predict = self._generate_to_predict(argsets)
 
-            for tp in self.to_predict:
-                e = tp[1]  # relation embedding
-                hjs = tp[2]  # hidden states
+            for tp in to_predict:
+                e = tp.predicate_embedding
+                hjs = tp.argument_hidden_vectors
                 cjs = [c for _ in hjs]
-                if len(tp[2]) > 1:  # TODO: deal with predicates with 1 argument
-                    h, c = self.cell.forward(hjs, cjs, e)
-                    logits = self.output_linear(h)
-                    p = F.softmax(logits)
-                    if p[0] > 0.5:  # assumes 0 index is the positive class
-                        self.candidates[(len(self.candidates), tp[0])] = h
-                        new_candidates = True
-                        predictions.append(
-                            "a_prediction"
-                        )  # TODO prediction representation, loss
+                h, c = self.cell.forward(hjs, cjs, e)
+                logits = self.output_linear(h)
+                p = F.softmax(logits)
+                if p[0] > 0.5:  # assumes 0 index is the positive class
+                    candidates.add_element(Element(tp.predicate,h))
+                    new_candidates = True
+                    predictions.append(
+                        "a_prediction"
+                    )  # TODO prediction representation, loss
             layer += 1
 
         return predictions
 
 
 def get_sentences(percent_test):
-    with open("text_sentences.txt") as f:
+    with open("../data/text_sentences.txt") as f:
         sentences = f.read().splitlines()
 
-    entities = pickle.load(  # TODO switch to json
-        open(path.abspath(path.dirname(__file__)) + "/entities.pickle", "rb")
+    entities = pickle.load( #TODO: move to json
+        open("../data/entities.pickle", "rb")
     )
 
     train_data, test_data = train_test_split(
@@ -313,21 +324,21 @@ def get_sentences(percent_test):
 def main():
     train_data, test_data = get_sentences(0.2)
 
-    vocab_dict = eval(open("vocab_dict.txt", "r").read())
-    configuration = json.load(open("../data/configuration.json", "r"))
-    entities_to_idx = json.load(
-        open("../data/entities.json", "r")
-    )  # TODO put these both in one file
-    relation_to_idx = json.load(open("../data/relations.json", "r"))
+    vocab_dict = eval(open("../data/vocab_dict.txt", "r").read())
+    config = BioInferTaskConfiguration().from_json('../data/configuration.json')
+    entity_to_idx = config.predicate_to_idx
+    predicate_to_idx = config.predicate_to_idx
 
     model = INNModel(
         vocab_dict,
         WORD_EMBEDDING_DIM,
         RELATION_EMBEDDING_DIM,
         HIDDEN_DIM,
-        configuration,
-        entities_to_idx,
-        relation_to_idx,
+        config.schema,
+        config.inverted_schema,
+        config.entity_to_idx,
+        config.predicate_to_idx,
+        5,
     )
 
     print("\n\n", train_data[0][0], "\n\n")
