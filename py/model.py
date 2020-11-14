@@ -104,33 +104,49 @@ class DAGLSTMCell(nn.Module):
 
         return h, c
 
-class ElementList():
-    def __init__(self,):
+
+class ElementList:
+    def __init__(
+        self,
+    ):
         self.elements = {}
 
     def add_element(self, element):
-        self.elements[(len(self.elements),element.name)] = element.hidden_vector
+        self.elements[(len(self.elements), element.name)] = element.hidden_vector
 
-    def items(self,):
+    def items(
+        self,
+    ):
         return self.elements.items()
 
-    def keys(self,):
+    def keys(
+        self,
+    ):
         return self.elements.keys()
 
-    def get_combinations(self,r):
-        return combinations(self.keys(),r)
+    def get_combinations(self, r):
+        return combinations(self.keys(), r)
 
     def __getitem__(self, key):
         return self.elements[key]
 
-    def __repr__(self,):
+    def __repr__(
+        self,
+    ):
         return str(self.elements)
 
-    def __len__(self,):
+    def __len__(
+        self,
+    ):
         return len(self.elements)
 
-Element = namedtuple('Element', ['name','hidden_vector'])
-PredictionCandidate = namedtuple('PredictionCandidate', ['predicate','predicate_embedding','argument_hidden_vectors'])
+
+Element = namedtuple("Element", ["name", "hidden_vector"])
+PredictionCandidate = namedtuple(
+    "PredictionCandidate",
+    ["predicate", "predicate_embedding", "argument_hidden_vectors"],
+)
+
 
 class INNModel(nn.Module):
     """INN model configuration.
@@ -235,7 +251,7 @@ class INNModel(nn.Module):
         h_entities = th.cat(h_entities)
         return h_entities
 
-    def _get_argsets_from_candidates(self,candidates):
+    def _get_argsets_from_candidates(self, candidates):
         argsets = set()
         for argset_idx in candidates.get_combinations(r=2):
             key = tuple(sorted([a[1] for a in argset_idx]))
@@ -252,13 +268,11 @@ class INNModel(nn.Module):
                 rels = self.inverted_schema[key]
                 for rel in rels.keys():
                     prediction_candidate = PredictionCandidate(
-                            f"{PREDICATE_PREFIX}{rel}",
-                            self.relation_embeddings(th.tensor(self.predicate_to_idx[rel])),
-                            [arg[1] for arg in argset],
-                        )
-                    to_predict.append(
-                        prediction_candidate
+                        f"{PREDICATE_PREFIX}{rel}",
+                        self.relation_embeddings(th.tensor(self.predicate_to_idx[rel])),
+                        [arg[1] for arg in argset],
                     )
+                    to_predict.append(prediction_candidate)
         return to_predict
 
     def forward(self, x):
@@ -269,12 +283,12 @@ class INNModel(nn.Module):
             embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
         )
 
-        entity_names = [ENTITY_PREFIX+ent[0] for ent in entities]
+        entity_names = [ENTITY_PREFIX + ent[0] for ent in entities]
         h_entities = self.get_h_entities(entities, blstm_out)
 
         candidates = ElementList()
-        for name, hidden_vector in zip(entity_names,h_entities):
-            el = Element(name,hidden_vector)
+        for name, hidden_vector in zip(entity_names, h_entities):
+            el = Element(name, hidden_vector)
             candidates.add_element(el)
 
         new_candidates = True
@@ -296,7 +310,7 @@ class INNModel(nn.Module):
                 logits = self.output_linear(h)
                 p = F.softmax(logits)
                 if p[0] > 0.5:  # assumes 0 index is the positive class
-                    candidates.add_element(Element(tp.predicate,h))
+                    candidates.add_element(Element(tp.predicate, h))
                     new_candidates = True
                     predictions.append(
                         "a_prediction"
@@ -310,9 +324,7 @@ def get_sentences(percent_test):
     with open("../data/text_sentences.txt") as f:
         sentences = f.read().splitlines()
 
-    entities = pickle.load( #TODO: move to json
-        open("../data/entities.pickle", "rb")
-    )
+    entities = pickle.load(open("../data/entities.pickle", "rb"))  # TODO: move to json
 
     train_data, test_data = train_test_split(
         list(zip(sentences, entities)), test_size=percent_test, random_state=0
@@ -325,7 +337,7 @@ def main():
     train_data, test_data = get_sentences(0.2)
 
     vocab_dict = eval(open("../data/vocab_dict.txt", "r").read())
-    config = BioInferTaskConfiguration().from_json('../data/configuration.json')
+    config = BioInferTaskConfiguration().from_json("../data/configuration.json")
     entity_to_idx = config.predicate_to_idx
     predicate_to_idx = config.predicate_to_idx
 
