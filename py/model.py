@@ -15,6 +15,7 @@ Authors:
 
 TODO:
     * Prediction representation & Loss
+    * Add a tree structure to candidates
     * Training
     * Batched training
 
@@ -31,6 +32,7 @@ from torch.nn import functional as F
 from sklearn.model_selection import train_test_split
 from itertools import combinations
 from collections import Counter, namedtuple
+from tqdm import tqdm
 
 from classes import BioInferTaskConfiguration
 
@@ -141,10 +143,10 @@ class ElementList:
         return len(self.elements)
 
 
-Element = namedtuple("Element", ["name", "hidden_vector"])
+Element = namedtuple("Element", ["name", "hidden_vector", "argument_names"])
 PredictionCandidate = namedtuple(
     "PredictionCandidate",
-    ["predicate", "predicate_embedding", "argument_hidden_vectors"],
+    ["predicate", "predicate_embedding", "argument_names", "argument_hidden_vectors"],
 )
 
 
@@ -210,6 +212,8 @@ class INNModel(nn.Module):
             nn.Linear(4 * self.hidden_dim, 2),
         )
 
+
+
     def get_word_embeddings(self, sentence):
         """
         Accepts a sentence as input and returns a list of embedding vectors, one vector per token.
@@ -268,8 +272,9 @@ class INNModel(nn.Module):
                 rels = self.inverted_schema[key]
                 for rel in rels.keys():
                     prediction_candidate = PredictionCandidate(
-                        f"{PREDICATE_PREFIX}{rel}",
+                        rel,
                         self.relation_embeddings(th.tensor(self.predicate_to_idx[rel])),
+                        tuple([arg[0][1] for arg in argset]),
                         [arg[1] for arg in argset],
                     )
                     to_predict.append(prediction_candidate)
@@ -277,6 +282,7 @@ class INNModel(nn.Module):
 
     def forward(self, x):
         sentence, entities = x
+
         embedded_sentence = self.get_word_embeddings(sentence)
 
         blstm_out, _ = self.blstm(
@@ -284,11 +290,12 @@ class INNModel(nn.Module):
         )
 
         entity_names = [ENTITY_PREFIX + ent[0] for ent in entities]
+
         h_entities = self.get_h_entities(entities, blstm_out)
 
         candidates = ElementList()
         for name, hidden_vector in zip(entity_names, h_entities):
-            el = Element(name, hidden_vector)
+            el = Element(name, hidden_vector, None)
             candidates.add_element(el)
 
         new_candidates = True
@@ -296,9 +303,10 @@ class INNModel(nn.Module):
         predictions = []
         c = self.cell.init_cell_state()
 
+        loss = 0
+
         while new_candidates and layer <= self.max_layer_height:
             new_candidates = False
-            print(f"==Layer {layer}==")
             argsets = self._get_argsets_from_candidates(candidates)
             to_predict = self._generate_to_predict(argsets)
 
@@ -310,11 +318,11 @@ class INNModel(nn.Module):
                 logits = self.output_linear(h)
                 p = F.softmax(logits)
                 if p[0] > 0.5:  # assumes 0 index is the positive class
-                    candidates.add_element(Element(tp.predicate, h))
+                    candidates.add_element(Element(tp.predicate, h, tp.argument_names))
                     new_candidates = True
                     predictions.append(
-                        "a_prediction"
-                    )  # TODO prediction representation, loss
+                        (p, tp.predicate, tp.argument_names)
+                    )
             layer += 1
 
         return predictions
@@ -326,8 +334,11 @@ def get_sentences(percent_test):
 
     entities = pickle.load(open("../data/entities.pickle", "rb"))  # TODO: move to json
 
+    with open('../data/relation_labels.json','r') as f:
+        relations = json.load(f)
+
     train_data, test_data = train_test_split(
-        list(zip(sentences, entities)), test_size=percent_test, random_state=0
+        list(zip(sentences, entities, relations)), test_size=percent_test, random_state=0
     )
 
     return train_data, test_data
@@ -355,14 +366,39 @@ def main():
 
     print("\n\n", train_data[0][0], "\n\n")
 
-    output = model.forward(train_data[0])
 
-    print(output)
+    optimizer = th.optim.Adadelta(model.parameters(), lr=1.0)
+    criterion = nn.NLLLoss()
 
-    # for epoch in range(EPOCHS):
-    #     for step, x in enumerate(train_data):
-    #         print("Epoch {:05d} | Step {:05d} | Loss {:.4f} |".format(
-    #             epoch, step, loss.item()))
+    for epoch in range(EPOCHS):
+        for step, x in enumerate(train_data):
+            if all([len(e[1]) > 0 for e in x[1]]):
+                optimizer.zero_grad()
+                loss = 0.0
+                output = model.forward((x[0],x[1]))
+                relations = x[2]
+                for prediction in output:
+                    if (prediction[1], prediction[2]) in relations:
+                        label = th.tensor([1.0], dtype=th.long)
+                    else:
+                        label = th.tensor([0.0], dtype=th.long)
+                    loss += criterion(th.tensor(prediction[0]).reshape(1,-1),label)
+                if loss != 0.0:
+                    loss.requires_grad = True
+                    loss.backward()
+                    optimizer.step()
+                    print("Epoch {:05d} | Step {:05d} | Loss {:.4f} |".format(epoch, step, loss.item()))
+
+        val_acc = []
+        for step, x in enumerate(test_data):
+            with th.no_grad():
+                output = model.forward((x[0],x[1]))
+                relations = x[2]
+                val_acc.append(len([prediction in relations for prediction in output]) / len(relations))
+
+            print("Epoch {:05d} | Step {:05d} | Val Acc {:.4f} |".format(epoch, step, np.mean(val_acc)))
+
+
 
     # acc = float(th.sum(th.eq(batch.label, pred))) / len(batch.label)
     # print("Epoch {:05d} | Step {:05d} | Loss {:.4f} | Acc {:.4f} |".format(
