@@ -381,7 +381,7 @@ def main():
     optimizer = th.optim.Adadelta(model.parameters(), lr=1.0)
     criterion = nn.NLLLoss()
 
-    for epoch in range(10):
+    for epoch in range(EPOCHS):
         for step, x in enumerate(train_data):
             if all([len(e[1]) > 0 for e in x[1]]):
                 optimizer.zero_grad()
