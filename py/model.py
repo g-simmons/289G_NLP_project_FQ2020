@@ -84,7 +84,7 @@ class DAGLSTMCell(nn.Module):
         )
 
     def init_cell_state(self):
-        return th.zeros(1, self.hidden_dim).clone().detach()
+        return th.zeros(1, self.hidden_dim).clone().detach().requires_grad_(True)
 
     def forward(self, hjs, cjs, e):
         v = th.cat(hjs)
@@ -306,8 +306,6 @@ class INNModel(nn.Module):
         predictions = []
         c = self.cell.init_cell_state()
 
-        loss = 0
-
         while new_candidates and layer <= self.max_layer_height:
             new_candidates = False
             argsets = self._get_argsets_from_candidates(candidates)
@@ -375,39 +373,58 @@ def main():
         5,
     )
 
-    print("\n\n", train_data[0][0], "\n\n")
-
 
     optimizer = th.optim.Adadelta(model.parameters(), lr=1.0)
     criterion = nn.NLLLoss()
 
     for epoch in range(EPOCHS):
         for step, x in enumerate(train_data):
+
             if all([len(e[1]) > 0 for e in x[1]]):
                 optimizer.zero_grad()
-                loss = 0.0  # TODO: the model shouldn't get 0 loss for making no predictions
-                output = model.forward((x[0],x[1]))
+                output = model.forward((x[0], x[1]))
                 relations = x[2]
+
+                loss = 0
+
                 for prediction in output:  # TODO: penalize for every golden label it doesn't get?
                     if (prediction[1], prediction[2]) in relations:
-                        label = th.tensor([1.0], dtype=th.long)
+                        label = th.tensor([0], dtype=th.long)  # TODO: Swapped; Check if this is correct
                     else:
-                        label = th.tensor([0.0], dtype=th.long)
+                        label = th.tensor([1], dtype=th.long)  # TODO: Swapped; Check if this is correct
 
-                    temp_tensor = prediction[0].clone().detach()
-                    loss += criterion(temp_tensor.reshape(1,-1),label)
-                if loss != 0.0:
-                    loss.requires_grad = True
-                    loss.backward()
-                    optimizer.step()
+                    temp_tensor = prediction[0].clone().detach().requires_grad_(True)
+                    loss += criterion(temp_tensor.reshape(1, -1), label)
+
+                # num actual relations - num predictions
+                num_rel_diff = len(relations) - len(output)
+
+                # TODO: because these are dummy tensors, grad_fn doesn't exist; how to fix?
+                # if there are fewer predictions than actual relations
+                # give the model the maximum penalty * number of predictions it didn't make
+                #if num_rel_diff > 0:
+                #    dummy_label = 1  # TODO: Swapped; Check if this is correct
+                #    dummy_pred = th.log(th.tensor([0.9999, 0.0001]))
+
+                #    for _ in range(num_rel_diff):
+                #        if label_list is None:
+                #            label_list = [dummy_label]
+                #            log_prob_list = dummy_pred
+                #        else:
+                #            label_list.append(dummy_label)
+                #            log_prob_list = th.vstack((log_prob_list, dummy_pred))
+
+                if loss != 0:
+                    #loss.requires_grad = True  TODO: the backpropagation wasn't working; setting it to True here
+                    loss.backward()            #TODO: just makes an empty grad_fn() that doesn't update anything
+                    optimizer.step()           #TODO: Note: backpropagation still doesn't work, prob with grad_fn
                     print("Epoch {:05d} | Step {:05d} | Loss {:.4f} |".format(epoch, step, loss.item()))
 
         val_acc = []
         for step, x in enumerate(test_data):
-            with th.no_grad(): # TODO: model isn't outputting anything for validation samples
+            with th.no_grad():
                 output = model.forward((x[0], x[1]))
                 relations = x[2]
-                print(len(relations), len(output))
                 val_acc.append(len([prediction in relations for prediction in output]) / len(relations))
 
             print("Epoch {:05d} | Step {:05d} | Val Acc {:.4f} |".format(epoch, step, np.mean(val_acc)))
