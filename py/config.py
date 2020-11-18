@@ -1,7 +1,7 @@
 ENTITY_PREFIX = "e-"
 PREDICATE_PREFIX = "p-"
 
-EPOCHS = 1
+EPOCHS = 3
 BATCH_SIZE = 8
 
 VECTOR_DIM = 256  # from page 6 of the paper
