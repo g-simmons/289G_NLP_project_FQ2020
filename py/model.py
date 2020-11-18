@@ -390,10 +390,11 @@ def main():
                 for prediction in output:  # TODO: penalize for every golden label it doesn't get?
                     if (prediction[1], prediction[2]) in relations:
                         label = th.tensor([0], dtype=th.long)  # TODO: Swapped; Check if this is correct
+                        print("correct")
                     else:
                         label = th.tensor([1], dtype=th.long)  # TODO: Swapped; Check if this is correct
 
-                    temp_tensor = prediction[0].clone().detach().requires_grad_(True)
+                    temp_tensor = th.log(prediction[0].clone().detach().requires_grad_(True))
                     loss += criterion(temp_tensor.reshape(1, -1), label)
 
                 # num actual relations - num predictions
