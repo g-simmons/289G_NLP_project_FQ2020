@@ -339,7 +339,7 @@ def get_sentences(percent_test):
     with open("../data/text_sentences.txt") as f:
         sentences = f.read().splitlines()
 
-    entities = pickle.load(open("../data/entities.pickle", "rb"))  # TODO: move to json
+    entities = pickle.load(open("../data/entities_filtered.pickle", "rb"))  # TODO: move to json
 
     with open('../data/relation_labels.json','r') as f:
         relations = json.load(f)
