@@ -399,7 +399,7 @@ def main():
                     else:
                         label = th.tensor([1], dtype=th.long)  # TODO: Swapped; Check if this is correct
 
-                    temp_tensor = prediction[0].clone().detach().requires_grad_(True)
+                    temp_tensor = prediction[0]
                     loss += criterion(th.log(temp_tensor.reshape(1, -1)), label)
 
                 # num actual relations - num predictions
@@ -431,9 +431,19 @@ def main():
             with th.no_grad():
                 output = model.forward((x[0], x[1]))
                 relations = x[2]
-                val_acc.append(len([prediction in relations for prediction in output]) / len(relations))
 
-            print("Epoch {:05d} | Step {:05d} | Val Acc {:.4f} |".format(epoch, step, np.mean(val_acc)))
+                num_pred_correct = 0
+                for prediction in output:
+                    # changes the prediction's formatting so that it matches relations'
+                    formatted_prediction = [prediction[1], list(prediction[2])]
+                    formatted_prediction[0] = formatted_prediction[0].split('-')[1]
+
+                    if formatted_prediction in relations:
+                        num_pred_correct += 1
+
+                val_acc.append(num_pred_correct / len(relations))
+
+        print("Epoch {:05d} | Val Acc {:.4f} |".format(epoch, np.mean(val_acc)))
 
 
 
