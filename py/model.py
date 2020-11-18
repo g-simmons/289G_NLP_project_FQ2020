@@ -388,7 +388,12 @@ def main():
                 loss = 0
 
                 for prediction in output:  # TODO: penalize for every golden label it doesn't get?
-                    if (prediction[1], prediction[2]) in relations:
+
+                    # changes the prediction's formatting so that it matches relations'
+                    formatted_prediction = [prediction[1], list(prediction[2])]
+                    formatted_prediction[0] = formatted_prediction[0].split('-')[1]
+
+                    if formatted_prediction in relations:
                         label = th.tensor([0], dtype=th.long)  # TODO: Swapped; Check if this is correct
                         print("correct")
                     else:
