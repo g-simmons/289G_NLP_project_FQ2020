@@ -252,6 +252,11 @@ class INNModel(nn.Module):
 
             for i in range(len(attn_weights)):
                 h_entity += attn_weights[i] * blstm_out[tok_indices][i]
+
+            if type(h_entity) is int:  # TODO: There is an error in entities.pickle; entity missing index
+                print("ERROR", h_entity, attn_weights, attn_scores_out[tok_indices],
+                      "\n", entity, tok_indices)
+
             h_entities.append(h_entity)
 
         h_entities = th.cat(h_entities)
@@ -339,8 +344,16 @@ def get_sentences(percent_test):
     with open('../data/relation_labels.json','r') as f:
         relations = json.load(f)
 
+    zipped_data = list(zip(sentences, entities, relations))
+
+    # deletes sentences with no relations
+    for i in range(len(zipped_data) - 1, -1, -1):
+        if zipped_data[i][2] == []:
+            del zipped_data[i]
+
+    print("new dataset length:", len(zipped_data))
     train_data, test_data = train_test_split(
-        list(zip(sentences, entities, relations)), test_size=percent_test, random_state=0
+        zipped_data, test_size=percent_test, random_state=0
     )
 
     return train_data, test_data
@@ -396,9 +409,9 @@ def main():
         val_acc = []
         for step, x in enumerate(test_data):
             with th.no_grad():
-                output = model.forward((x[0],x[1]))
-                relations = x[2]                 # ERROR: len(relations) = 0
-                val_acc.append(len([prediction in relations for prediction in output]) )#/ len(relations))
+                output = model.forward((x[0], x[1]))
+                relations = x[2]
+                val_acc.append(len([prediction in relations for prediction in output]) / len(relations))
 
             print("Epoch {:05d} | Step {:05d} | Val Acc {:.4f} |".format(epoch, step, np.mean(val_acc)))
 
