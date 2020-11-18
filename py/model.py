@@ -253,10 +253,6 @@ class INNModel(nn.Module):
             for i in range(len(attn_weights)):
                 h_entity += attn_weights[i] * blstm_out[tok_indices][i]
 
-            if type(h_entity) is int:  # TODO: There is an error in entities.pickle; entity missing index
-                print("ERROR", h_entity, attn_weights, attn_scores_out[tok_indices],
-                      "\n", entity, tok_indices)
-
             h_entities.append(h_entity)
 
         h_entities = th.cat(h_entities)
@@ -385,14 +381,14 @@ def main():
     optimizer = th.optim.Adadelta(model.parameters(), lr=1.0)
     criterion = nn.NLLLoss()
 
-    for epoch in range(EPOCHS):
+    for epoch in range(10):
         for step, x in enumerate(train_data):
             if all([len(e[1]) > 0 for e in x[1]]):
                 optimizer.zero_grad()
-                loss = 0.0
+                loss = 0.0  # TODO: the model shouldn't get 0 loss for making no predictions
                 output = model.forward((x[0],x[1]))
                 relations = x[2]
-                for prediction in output:
+                for prediction in output:  # TODO: penalize for every golden label it doesn't get?
                     if (prediction[1], prediction[2]) in relations:
                         label = th.tensor([1.0], dtype=th.long)
                     else:
@@ -408,9 +404,10 @@ def main():
 
         val_acc = []
         for step, x in enumerate(test_data):
-            with th.no_grad():
+            with th.no_grad(): # TODO: model isn't outputting anything for validation samples
                 output = model.forward((x[0], x[1]))
                 relations = x[2]
+                print(len(relations), len(output))
                 val_acc.append(len([prediction in relations for prediction in output]) / len(relations))
 
             print("Epoch {:05d} | Step {:05d} | Val Acc {:.4f} |".format(epoch, step, np.mean(val_acc)))
