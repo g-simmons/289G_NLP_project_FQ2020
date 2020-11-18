@@ -28,7 +28,7 @@ import pickle
 import numpy as np
 import torch as th
 from torch import nn
-from torch.nn import functional as F
+from torch.nn import functional as functional
 from sklearn.model_selection import train_test_split
 from itertools import combinations
 from collections import Counter, namedtuple
@@ -84,7 +84,7 @@ class DAGLSTMCell(nn.Module):
         )
 
     def init_cell_state(self):
-        return th.tensor(th.zeros(1, self.hidden_dim))
+        return th.zeros(1, self.hidden_dim).clone().detach()
 
     def forward(self, hjs, cjs, e):
         v = th.cat(hjs)
@@ -248,10 +248,12 @@ class INNModel(nn.Module):
         for entity in entities:
             tok_indices = list(entity[1])
             h_entity = 0
-            attn_weights = F.softmax(attn_scores_out[tok_indices])
+            attn_weights = functional.softmax(attn_scores_out[tok_indices], dim=0)
+
             for i in range(len(attn_weights)):
                 h_entity += attn_weights[i] * blstm_out[tok_indices][i]
             h_entities.append(h_entity)
+
         h_entities = th.cat(h_entities)
         return h_entities
 
@@ -316,7 +318,7 @@ class INNModel(nn.Module):
                 cjs = [c for _ in hjs]
                 h, c = self.cell.forward(hjs, cjs, e)
                 logits = self.output_linear(h)
-                p = F.softmax(logits)
+                p = functional.softmax(logits, dim=0)
                 if p[0] > 0.5:  # assumes 0 index is the positive class
                     candidates.add_element(Element(tp.predicate, h, tp.argument_names))
                     new_candidates = True
@@ -382,7 +384,9 @@ def main():
                         label = th.tensor([1.0], dtype=th.long)
                     else:
                         label = th.tensor([0.0], dtype=th.long)
-                    loss += criterion(th.tensor(prediction[0]).reshape(1,-1),label)
+
+                    temp_tensor = prediction[0].clone().detach()
+                    loss += criterion(temp_tensor.reshape(1,-1),label)
                 if loss != 0.0:
                     loss.requires_grad = True
                     loss.backward()
@@ -393,8 +397,8 @@ def main():
         for step, x in enumerate(test_data):
             with th.no_grad():
                 output = model.forward((x[0],x[1]))
-                relations = x[2]
-                val_acc.append(len([prediction in relations for prediction in output]) / len(relations))
+                relations = x[2]                 # ERROR: len(relations) = 0
+                val_acc.append(len([prediction in relations for prediction in output]) )#/ len(relations))
 
             print("Epoch {:05d} | Step {:05d} | Val Acc {:.4f} |".format(epoch, step, np.mean(val_acc)))
 
