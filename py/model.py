@@ -394,8 +394,8 @@ def main():
                     else:
                         label = th.tensor([1], dtype=th.long)  # TODO: Swapped; Check if this is correct
 
-                    temp_tensor = th.log(prediction[0].clone().detach().requires_grad_(True))
-                    loss += criterion(temp_tensor.reshape(1, -1), label)
+                    temp_tensor = prediction[0].clone().detach().requires_grad_(True)
+                    loss += criterion(th.log(temp_tensor.reshape(1, -1)), label)
 
                 # num actual relations - num predictions
                 num_rel_diff = len(relations) - len(output)
