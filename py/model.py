@@ -26,9 +26,13 @@ from os import path
 import json
 import pickle
 import numpy as np
+import hiddenlayer as hl
 import torch as th
 from torch import nn
 from torch.nn import functional as functional
+from torch.utils.tensorboard import SummaryWriter
+from torch.autograd import Variable
+from torchtext.vocab import Vocab
 from sklearn.model_selection import train_test_split
 from itertools import combinations
 from collections import Counter, namedtuple
@@ -66,16 +70,16 @@ class DAGLSTMCell(nn.Module):
         self.relation_embedding_dim = relation_embedding_dim
         self.max_inputs = max_inputs
 
-        self.W_ioc_hat = nn.Linear(relation_embedding_dim, 3 * hidden_dim)
+        self.W_ioc_hat = nn.Linear(relation_embedding_dim, 3 * hidden_dim, bias=False)
         self.W_fs = nn.ModuleList(
-            [nn.Linear(relation_embedding_dim, hidden_dim) for j in range(max_inputs)]
+            [nn.Linear(relation_embedding_dim, hidden_dim, bias=False) for j in range(max_inputs)]
         )
 
         self.U_ioc_hat = nn.Linear(
-            max_inputs * hidden_dim, 3 * hidden_dim
+            max_inputs * hidden_dim, 3 * hidden_dim, bias=False
         )  # can pad with zeros to have dynamic
         self.U_fs = nn.ModuleList(
-            [nn.Linear(max_inputs * hidden_dim, hidden_dim) for j in range(max_inputs)]
+            [nn.Linear(max_inputs * hidden_dim, hidden_dim, bias=False) for j in range(max_inputs)]
         )
 
         self.b_ioc_hat = nn.Parameter(th.zeros(3 * hidden_dim))
@@ -159,8 +163,7 @@ class INNModel(nn.Module):
         relation_embedding_dim (int): The size of the relation embedding vectors.
         hidden_dim (int): The size of LSTM hidden vector (effectively 1/2 of the desired BiLSTM output size).
         schema: The task schema
-        entity_to_idx (dict): dictionary mapping entity strings to unique integer values
-        predicate_to_idx: dictionary mapping relation strings to unique integer values
+        element_to_idx (dict): dictionary mapping entity strings to unique integer values
     """
 
     def __init__(
@@ -171,8 +174,7 @@ class INNModel(nn.Module):
         hidden_dim,
         schema,
         inverted_schema,
-        entity_to_idx,
-        predicate_to_idx,
+        element_to_idx,
         max_layer_height,
     ):
         super().__init__()
@@ -182,14 +184,14 @@ class INNModel(nn.Module):
         self.relation_embedding_dim = relation_embedding_dim
         self.schema = schema
         self.inverted_schema = inverted_schema
-        self.entity_to_idx = entity_to_idx
-        self.predicate_to_idx = predicate_to_idx
+        self.element_to_idx = element_to_idx
+        self.idx_to_element = {v:k for k,v in element_to_idx.items()}
         self.max_layer_height = max_layer_height
 
         self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
 
-        self.relation_embeddings = nn.Embedding(
-            len(schema.keys()), self.relation_embedding_dim
+        self.element_embeddings = nn.Embedding(
+            len(element_to_idx.keys()), self.relation_embedding_dim
         )
 
         self.attn_scores = nn.Linear(in_features=self.hidden_dim * 2, out_features=1)
@@ -213,24 +215,7 @@ class INNModel(nn.Module):
         )
 
 
-
-    def get_word_embeddings(self, sentence):
-        """
-        Accepts a sentence as input and returns a list of embedding vectors, one vector per token.
-        i-th embedding vector corresponds to the i-th token
-        """
-        token_list = sentence.split()
-
-        index_list = []
-        for token in token_list:
-            if token in self.vocab_dict:
-                index_list.append(self.vocab_dict[token])
-            else:
-                index_list.append(self.vocab_dict["UNK"])
-
-        return self.word_embeddings(th.LongTensor(index_list))
-
-    def get_h_entities(self, entities, blstm_out):
+    def get_h_entities(self, entity_indices, blstm_out):
         """Apply attention mechanism to entity representation.
 
         Args:
@@ -245,23 +230,20 @@ class INNModel(nn.Module):
         """
         h_entities = []
         attn_scores_out = self.attn_scores(blstm_out)
-        for entity in entities:
-            tok_indices = list(entity[1])
-            h_entity = 0
-            attn_weights = functional.softmax(attn_scores_out[tok_indices], dim=0)
-
-            for i in range(len(attn_weights)):
-                h_entity += attn_weights[i] * blstm_out[tok_indices][i]
-
+        for tok_indices in entity_indices:
+            idx = tok_indices[tok_indices >= 0]
+            attn_scores = th.index_select(attn_scores_out,dim=0, index=idx)
+            attn_weights = functional.softmax(attn_scores,dim=0)
+            h_entity = th.matmul(attn_weights, blstm_out[idx])
+            h_entity = h_entity.sum(axis=0)
             h_entities.append(h_entity)
-
         h_entities = th.cat(h_entities)
         return h_entities
 
     def _get_argsets_from_candidates(self, candidates):
         argsets = set()
         for argset_idx in candidates.get_combinations(r=2):
-            key = tuple(sorted([a[1] for a in argset_idx]))
+            key = tuple(sorted([self.idx_to_element[a[1].item()] for a in argset_idx]))
             if key in self.inverted_schema.keys():
                 argset = tuple((c, candidates[c]) for c in argset_idx)
                 argsets.add(argset)
@@ -270,31 +252,31 @@ class INNModel(nn.Module):
     def _generate_to_predict(self, argsets):
         to_predict = []
         for argset in argsets:
-            key = tuple(sorted([arg[0][1] for arg in argset]))
+            key = tuple(sorted([self.idx_to_element[arg[0][1].item()] for arg in argset]))
             if len(key) > 1:
                 rels = self.inverted_schema[key]
                 for rel in rels.keys():
                     prediction_candidate = PredictionCandidate(
                         rel,
-                        self.relation_embeddings(th.tensor(self.predicate_to_idx[rel])),
+                        self.element_embeddings(th.tensor(self.element_to_idx[rel])),
                         tuple([arg[0][1] for arg in argset]),
                         [arg[1] for arg in argset],
                     )
                     to_predict.append(prediction_candidate)
         return to_predict
 
-    def forward(self, x):
-        sentence, entities = x
+    def forward(self, sentence, entity_names, entity_indices):
 
-        embedded_sentence = self.get_word_embeddings(sentence)
+        embedded_sentence = self.word_embeddings(sentence)
 
         blstm_out, _ = self.blstm(
             embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
         )
 
-        entity_names = [ENTITY_PREFIX + ent[0] for ent in entities]
+        h_entities = self.get_h_entities(entity_indices, blstm_out)
 
-        h_entities = self.get_h_entities(entities, blstm_out)
+        # candidate_names = entity_names
+        # candidate_hidden_vectors = h_entities
 
         candidates = ElementList()
         for name, hidden_vector in zip(entity_names, h_entities):
@@ -306,37 +288,54 @@ class INNModel(nn.Module):
         predictions = []
         c = self.cell.init_cell_state()
 
-        while new_candidates and layer <= self.max_layer_height:
-            new_candidates = False
-            argsets = self._get_argsets_from_candidates(candidates)
-            to_predict = self._generate_to_predict(argsets)
+        # while new_candidates and layer <= self.max_layer_height:
+        #     # candidate_indices = th.arange(entity_names.shape[0])
+        #     # tp_combinations = th.combinations(entity_indices,r=2)
 
-            for tp in to_predict:
-                e = tp.predicate_embedding
-                hjs = tp.argument_hidden_vectors
-                cjs = [c for _ in hjs]
-                h, c = self.cell.forward(hjs, cjs, e)
-                logits = self.output_linear(h)
-                p = functional.softmax(logits, dim=0)
-                if p[0] > 0.5:  # assumes 0 index is the positive class
-                    candidates.add_element(Element(tp.predicate, h, tp.argument_names))
-                    new_candidates = True
-                    predictions.append(
-                        (p, tp.predicate, tp.argument_names)
-                    )
-            layer += 1
+        #     # for comb in tp_combinations:
+        #     #     candidate_names.append(th.index_select(candidate_names,dim=0,index=comb))
+        #     #     candidate_hidden_vectors.append(th.index_select(candidate_hidden_vectors,dim=0,index=comb))
 
-        return predictions
 
+        #     new_candidates = False
+        #     argsets = self._get_argsets_from_candidates(candidates)
+        #     to_predict = self._generate_to_predict(argsets)
+        #     for tp in to_predict:
+        #         e = tp.predicate_embedding
+        #         hjs = tp.argument_hidden_vectors
+        #         cjs = [c for _ in hjs]
+        #         h, c = self.cell.forward(hjs, cjs, e)
+        #         logits = self.output_linear(h)
+        #         p = functional.softmax(logits, dim=0)
+        #         if p[0] > 0.5:  # assumes 0 index is the positive class
+        #             candidates.add_element(Element(th.tensor(th.tensor(self.element_to_idx[tp.predicate])), h, tp.argument_names))
+        #             new_candidates = True
+        #             predictions.append((p, th.tensor(self.element_to_idx[tp.predicate]), tp.argument_names))
+
+        #     layer += 1
+        return h_entities
+
+def sent_to_idxs(sentence,vocab_dict):
+    token_list = sentence.split()
+
+    index_list = []
+    for token in token_list:
+        if token in vocab_dict:
+            index_list.append(vocab_dict[token])
+        else:
+            index_list.append(vocab_dict["UNK"])
+    return th.LongTensor(index_list)
 
 def get_sentences(percent_test):
     with open("../data/text_sentences.txt") as f:
         sentences = f.read().splitlines()
 
-    entities = pickle.load(open("../data/entities_filtered.pickle", "rb"))  # TODO: move to json
+    entities = json.load(open("../data/entity_labels.json", "r"))
 
     with open('../data/relation_labels.json','r') as f:
         relations = json.load(f)
+
+    relations = [tuple((p, tuple(args)) for p, args in relation) for relation in relations]
 
     zipped_data = list(zip(sentences, entities, relations))
 
@@ -345,7 +344,7 @@ def get_sentences(percent_test):
         if zipped_data[i][2] == []:
             del zipped_data[i]
 
-    print("new dataset length:", len(zipped_data))
+    # print("new dataset length:", len(zipped_data))
     train_data, test_data = train_test_split(
         zipped_data, test_size=percent_test, random_state=0
     )
@@ -358,8 +357,7 @@ def main():
 
     vocab_dict = eval(open("../data/vocab_dict.txt", "r").read())
     config = BioInferTaskConfiguration().from_json("../data/configuration.json")
-    entity_to_idx = config.predicate_to_idx
-    predicate_to_idx = config.predicate_to_idx
+    element_to_idx = config.element_to_idx
 
     model = INNModel(
         vocab_dict,
@@ -368,42 +366,77 @@ def main():
         HIDDEN_DIM,
         config.schema,
         config.inverted_schema,
-        config.entity_to_idx,
-        config.predicate_to_idx,
+        config.element_to_idx,
         5,
     )
-
 
     optimizer = th.optim.Adadelta(model.parameters(), lr=1.0)
     criterion = nn.NLLLoss()
 
+    writer = SummaryWriter()
+
+    sample = train_data[0]
+
+    sent_idxs = sent_to_idxs(sample[0],vocab_dict)
+    entity_names = th.tensor([th.tensor(element_to_idx[e[0]]) for e in sample[1]])
+    entity_indices = [th.tensor(e[1]) for e in sample[1]]
+    entity_indices = th.stack([functional.pad(e,pad=(0,5-len(e)),mode='constant',value=-1) for e in entity_indices])
+    entity_names = entity_names.reshape(-1,1)
+
+    writer.add_graph(model, input_to_model=(sent_idxs, entity_names, entity_indices), verbose=True)
+    writer.flush()
+
     for epoch in range(EPOCHS):
         for step, x in enumerate(train_data):
+            sent_idxs = sent_to_idxs(x[0],vocab_dict)
+            entity_names = th.tensor([th.tensor(element_to_idx[e[0]]) for e in x[1]])
+            entity_names = entity_names.reshape(-1,1)
+            entity_indices = [th.tensor(e[1]) for e in x[1]]
+            entity_indices = th.stack([functional.pad(e,pad=(0,5-len(e)),mode='constant',value=-1) for e in entity_indices])
 
             if all([len(e[1]) > 0 for e in x[1]]):
                 optimizer.zero_grad()
-                output = model.forward((x[0], x[1]))
+                output = model(sent_idxs, entity_names, entity_indices)
+                output_tuples = [(o[0], o[1].item(), tuple(i.item() for i in o[2])) for o in output]
                 relations = x[2]
+                relations = [(element_to_idx[r[0]], tuple(element_to_idx[i] for i in r[1])) for r in relations]
 
-                loss = 0
+                loss = 0.0
 
-                for prediction in output:  # TODO: penalize for every golden label it doesn't get?
+                for true_rel in relations:
+                    match = False
+                    for prediction in output_tuples:
+                        if true_rel == (prediction[1], prediction[2]):
+                            loss += criterion(th.log(prediction[0].reshape(1,-1)), th.tensor([0]))
+                            match = True
+                    if not match:
+                        loss += criterion(th.log(th.tensor([[0.001, 0.999]])), th.tensor([0]))
 
-                    # changes the prediction's formatting so that it matches relations'
-                    formatted_prediction = [prediction[1], list(prediction[2])]
-                    formatted_prediction[0] = formatted_prediction[0].split('-')[1]
+                for prediction in output_tuples:
+                    if (prediction[1], prediction[2]) not in relations:
+                        loss += criterion(th.log(prediction[0].reshape(1,-1)), th.tensor([1]))
 
-                    if formatted_prediction in relations:
-                        label = th.tensor([0], dtype=th.long)  # TODO: Swapped; Check if this is correct
-                        print("correct")
-                    else:
-                        label = th.tensor([1], dtype=th.long)  # TODO: Swapped; Check if this is correct
+                # y_vals = {}
+                # keys = set(output).union(set(relations))
+                # labels = []
+                # predicted_probas = []
+                # for key in keys:
+                #     if key in relations:
+                #         labels.append(0)
+                #     else:
+                #         labels.append(1)
+                #     if key in output:
+                #         predicted_probas.append(th.log(output[key].reshape(1, -1)))
+                #     else:
+                #         predicted_probas.append(th.tensor([0.0, 1.0]))
 
-                    temp_tensor = prediction[0]
-                    loss += criterion(th.log(temp_tensor.reshape(1, -1)), label)
+
+                # predicted_probas = th.log(th.cat(predicted_probas)).reshape(1,-1)
+
+
 
                 # num actual relations - num predictions
-                num_rel_diff = len(relations) - len(output)
+                # num_rel_diff = len(relations) - len(output)
 
                 # TODO: because these are dummy tensors, grad_fn doesn't exist; how to fix?
                 # if there are fewer predictions than actual relations
@@ -419,26 +452,28 @@ def main():
                 #        else:
                 #            label_list.append(dummy_label)
                 #            log_prob_list = th.vstack((log_prob_list, dummy_pred))
-
+                loss = Variable(loss, requires_grad=True)
                 if loss != 0:
-                    #loss.requires_grad = True  TODO: the backpropagation wasn't working; setting it to True here
+                    # loss.requires_grad = True  #TODO: the backpropagation wasn't working; setting it to True here
                     loss.backward()            #TODO: just makes an empty grad_fn() that doesn't update anything
                     optimizer.step()           #TODO: Note: backpropagation still doesn't work, prob with grad_fn
-                    print("Epoch {:05d} | Step {:05d} | Loss {:.4f} |".format(epoch, step, loss.item()))
+                print("Epoch {:05d} | Step {:05d} | Loss {:.4f} |".format(epoch, step, loss))
 
         val_acc = []
         for step, x in enumerate(test_data):
             with th.no_grad():
-                output = model.forward((x[0], x[1]))
+                sent_idxs = sent_to_idxs(x[0],vocab_dict)
+                entities = [(th.tensor(element_to_idx[e[0]]), th.tensor(e[1])) for e in x[1]]
+                output = model(sent_idxs, entities)
                 relations = x[2]
 
                 num_pred_correct = 0
                 for prediction in output:
                     # changes the prediction's formatting so that it matches relations'
-                    formatted_prediction = [prediction[1], list(prediction[2])]
-                    formatted_prediction[0] = formatted_prediction[0].split('-')[1]
+                    # formatted_prediction = [prediction[1], list(prediction[2])]
+                    # formatted_prediction[0] = formatted_prediction[0].split('-')[1]
 
-                    if formatted_prediction in relations:
+                    if prediction in relations:
                         num_pred_correct += 1
 
                 val_acc.append(num_pred_correct / len(relations))
@@ -450,6 +485,8 @@ def main():
     # acc = float(th.sum(th.eq(batch.label, pred))) / len(batch.label)
     # print("Epoch {:05d} | Step {:05d} | Loss {:.4f} | Acc {:.4f} |".format(
     #     epoch, step, loss.item(), acc))
+
+    writer.close()
 
     return 0
 

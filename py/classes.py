@@ -15,8 +15,7 @@ from collections import Counter, OrderedDict
 class BioInferTaskConfiguration:
     def __init__(self):
         self.schema = None
-        self.entity_to_idx = None
-        self.predicate_to_idx = None
+        self.element_to_idx = None
         self.entity_prefix = None
         self.predicate_prefix = None
 
@@ -27,7 +26,7 @@ class BioInferTaskConfiguration:
                 if f.rootNode.isPredicate() and not f.rootNode.isEntity():
                     predicate_name = f.rootNode.predicate.name
                     key = f"{self.predicate_prefix}{predicate_name}"
-                    if predicate_name not in schema.keys():
+                    if key not in schema.keys():
                         schema[key] = Counter()
                     arguments = self._get_relnode_argument_types(f.rootNode)
                     schema[key][arguments] += 1
@@ -74,28 +73,24 @@ class BioInferTaskConfiguration:
 
         return tuple(sorted(list(arguments)))
 
-    def _create_entity_to_idx(self, schema: dict, entity_prefix: str) -> dict:
+    def _get_entities(self, parser, entity_prefix: str) -> dict:
         entities = set()
-        for rel, argsets in schema.items():
-            for argset in argsets:
-                for arg in argset:
-                    if ENTITY_PREFIX in arg:
-                        entities.add(arg.replace(ENTITY_PREFIX, ""))
+        for s in parser.bioinfer.sentences.sentences:
+            for e in s.entities:
+                entity_type = e.type.name
+                if 'RELATIONSHIP' not in entity_type:
+                    entities.add(f"{ENTITY_PREFIX}{entity_type}")
         entities = list(entities)
 
-        entity_to_idx = {entities[i]: i for i in range(len(entities))}
-        return entity_to_idx
+        return entities
 
-    def _create_predicate_to_idx(self, schema) -> dict:
-        predicates = list(schema.keys())
-        predicate_to_idx = {predicates[i]: i for i in range(len(predicates))}
-        return predicate_to_idx
+    def _get_predicates(self, schema) -> dict:
+        return list(schema.keys())
 
     def to_json(self, path) -> None:
         schema_to_write = {}
         schema_to_write["schema"] = self._combine_schema_keys(self.schema)
-        schema_to_write["entity_to_idx"] = self.entity_to_idx
-        schema_to_write["predicate_to_idx"] = self.predicate_to_idx
+        schema_to_write["element_to_idx"] = self.element_to_idx
 
         with open(path, "w") as f:
             json.dump(schema_to_write, f)
@@ -113,8 +108,7 @@ class BioInferTaskConfiguration:
         self.predicate_prefix = predicate_prefix
         self.schema = self._split_schema_keys(json_loaded["schema"])
         self.inverted_schema = self._invert_schema(self.schema)
-        self.entity_to_idx = json_loaded["entity_to_idx"]
-        self.predicate_to_idx = json_loaded["predicate_to_idx"]
+        self.element_to_idx = json_loaded["element_to_idx"]
 
         return self
 
@@ -128,8 +122,10 @@ class BioInferTaskConfiguration:
         self.predicate_prefix = predicate_prefix
         self.schema = self._create_schema(parser)
         self.inverted_schema = self._invert_schema(self.schema)
-        self.entity_to_idx = self._create_entity_to_idx(self.schema, entity_prefix)
-        self.predicate_to_idx = self._create_predicate_to_idx(self.schema)
+        entities = self._get_entities(parser,ENTITY_PREFIX)
+        predicates = self._get_predicates(self.schema)
+        elements = entities + predicates
+        self.element_to_idx = {elements[i]: i for i in range(len(elements))}
 
         return self
 
@@ -137,8 +133,7 @@ class BioInferTaskConfiguration:
         return str(
             {
                 "schema": self.schema,
-                "entity_to_idx": self.entity_to_idx,
-                "predicate_to_idx": self.predicate_to_idx,
+                "element_to_idx": self.element_to_idx,
                 "entity_prefix": self.entity_prefix,
                 "predicate_prefix": self.predicate_prefix,
             }
