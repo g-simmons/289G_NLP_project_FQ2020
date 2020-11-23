@@ -15,6 +15,8 @@ from config import (
     BATCH_SIZE,
     MAX_LAYERS,
     MAX_ENTITY_TOKENS,
+    CELL_STATE_CLAMP_VAL,
+    HIDDEN_STATE_CLAMP_VAL
 )
 
 
@@ -37,6 +39,8 @@ class INNModel(nn.Module):
         word_embedding_dim,
         relation_embedding_dim,
         hidden_dim,
+        cell_state_clamp_val,
+        hidden_state_clamp_val
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -62,6 +66,8 @@ class INNModel(nn.Module):
             hidden_dim=2 * self.hidden_dim,
             relation_embedding_dim=self.relation_embedding_dim,
             max_inputs=2,
+            hidden_state_clamp_val=hidden_state_clamp_val,
+            cell_state_clamp_val=cell_state_clamp_val,
         )
 
         self.output_linear = nn.Sequential(
@@ -130,28 +136,37 @@ class INNModel(nn.Module):
 
         H = self.get_h_entities(entity_spans, blstm_out, H)
 
-        predictions = torch.empty((H.shape[0], 2))
+        # predictions = torch.empty((H.shape[0], 2),requires_grad=True)
 
-        predictions[0 : len(entity_spans)] = torch.tensor(
-            [0.0, 1.0]
-        )  # predict positive for the entities
+        # predictions[0 : len(entity_spans)] = torch.tensor(
+        #     [0.001, 0.999]
+        # )  # predict positive for the entities
+
+        predictions = []
+
+        for i in range(0,len(entity_spans)):
+            predictions.append(torch.tensor([0.001, 0.999]))
 
         c = self.cell.init_cell_state()
 
         for argset, target_idx, element_name in zip(S, T, element_names):
             if target_idx >= len(entity_spans):
                 args_idx = argset[argset > -1]
-                if torch.all(predictions[args_idx, 1] > 0.5):
+                if torch.all(torch.stack(predictions)[args_idx, 1] > 0.5):
                     hidden_vectors = H[args_idx]
                     cell_states = [c for _ in hidden_vectors]
                     e = self.element_embeddings(element_name)
                     h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
                     H[target_idx] = h_out
                     logits = self.output_linear(h_out)
-                    predictions[target_idx] = functional.softmax(logits, dim=0)
+                    # predictions[target_idx] = functional.softmax(logits, dim=0)
+                    sm_logits = functional.softmax(logits, dim=0)
+                    predictions.append(sm_logits)
                 else:
+                    predictions.append(torch.tensor([0.999, 0.001]))
                     predictions[target_idx] = torch.tensor(
-                        [1.0, 0.0]
+                        [0.999, 0.001]
                     )  # predict negative if all arguments have not been predicted positive
+        predictions = torch.stack(predictions)
 
         return predictions
