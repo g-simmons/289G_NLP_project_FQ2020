@@ -75,16 +75,17 @@ class BioInferDataset(Dataset):
         return sample
 
     def create_vocab_dictionary(self, parser):
-        vocab = {"UNK"}
+        vocab = set()
 
         for s in parser.bioinfer.sentences.sentences:
             for token in s.tokens:
                 vocab.add(token.getText())
 
         vocab_size = len(vocab)
-        vocab_index_list = [index for index in range(vocab_size)]
+        vocab_index_list = [index for index in range(1, vocab_size)]
 
         vocab_dict = dict(zip(vocab, vocab_index_list))
+        vocab_dict["UNK"] = 0
         return vocab_dict
 
     def get_entities(self, parser):

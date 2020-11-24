@@ -131,7 +131,7 @@ class INNModel(nn.Module):
         embedded_sentence = self.word_embeddings(tokens)
 
         blstm_out, _ = self.blstm(
-            embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
+            embedded_sentence.view(embedded_sentence.shape[2], 1, -1)
         )
 
         H = self.get_h_entities(entity_spans, blstm_out, H)
