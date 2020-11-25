@@ -90,13 +90,26 @@ class INNModel(nn.Module):
         """
         H_new = torch.clone(H)
         attn_scores_out = self.attn_scores(blstm_out)
+        print("shape 3", attn_scores_out.shape)
         for i, tok_indices in enumerate(entity_indices):
             idx = tok_indices[tok_indices >= 0]
             attn_scores = torch.index_select(attn_scores_out, dim=0, index=idx)
+            print("shape 4", attn_scores.shape)
             attn_weights = functional.softmax(attn_scores, dim=0)
-            h_entity = torch.matmul(attn_weights, blstm_out[idx])
-            h_entity = h_entity.sum(axis=0)
-            H_new[i] = h_entity
+            print("shape 5", attn_weights.shape)
+
+            # for each batch
+            for batch_num in range(BATCH_SIZE):
+                # gets the current batch's attention weights
+                curr_batch_attn_weights = attn_weights[:, batch_num]
+
+                # multiplies the current batch's attention weights and current batch's blstm_out
+                # creates a T x D matrix where T is the number of tokens and D is blstm_out's dimension
+                h_entity = torch.matmul(curr_batch_attn_weights, blstm_out[i, batch_num].unsqueeze(0))
+
+                # TODO: currently creates a tensor of dimension 512; is this correct?
+                h_entity = h_entity.sum(axis=0)
+                H_new[i, batch_num] = h_entity
         return H_new
 
     def _get_argsets_from_candidates(self, candidates):
@@ -130,9 +143,10 @@ class INNModel(nn.Module):
 
         embedded_sentence = self.word_embeddings(tokens)
 
-        blstm_out, _ = self.blstm(
-            embedded_sentence.view(embedded_sentence.shape[2], 1, -1)
-        )
+        print("shape 1", embedded_sentence.shape)
+        blstm_out, _ = self.blstm(embedded_sentence)
+
+        print("shape 2", blstm_out.shape)
 
         H = self.get_h_entities(entity_spans, blstm_out, H)
 
