@@ -90,13 +90,16 @@ class INNModel(nn.Module):
         """
         H_new = torch.clone(H)
         attn_scores_out = self.attn_scores(blstm_out)
-        print("shape 3", attn_scores_out.shape)
+
         for i, tok_indices in enumerate(entity_indices):
             idx = tok_indices[tok_indices >= 0]
+
+            if idx.nelement() == 0:
+                # TODO: maybe set corresponding H_new entries to 0
+                continue
+
             attn_scores = torch.index_select(attn_scores_out, dim=0, index=idx)
-            print("shape 4", attn_scores.shape)
             attn_weights = functional.softmax(attn_scores, dim=0)
-            print("shape 5", attn_weights.shape)
 
             # for each batch
             for batch_num in range(BATCH_SIZE):
@@ -107,7 +110,7 @@ class INNModel(nn.Module):
                 # creates a T x D matrix where T is the number of tokens and D is blstm_out's dimension
                 h_entity = torch.matmul(curr_batch_attn_weights, blstm_out[i, batch_num].unsqueeze(0))
 
-                # TODO: currently creates a tensor of dimension 512; is this correct?
+                # creates a vector of length D (512) and stores it in H_new
                 h_entity = h_entity.sum(axis=0)
                 H_new[i, batch_num] = h_entity
         return H_new
@@ -164,7 +167,7 @@ class INNModel(nn.Module):
         c = self.cell.init_cell_state()
 
         for argset, target_idx, element_name in zip(S, T, element_names):
-            if target_idx >= len(entity_spans):
+            if target_idx >= len(entity_spans) and element_name > -1:
                 args_idx = argset[argset > -1]
                 if torch.all(torch.stack(predictions)[args_idx, 1] > 0.5):
                     hidden_vectors = H[args_idx]

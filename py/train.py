@@ -122,10 +122,8 @@ def collate_func(data):
 
     # pads the tokens with UNK's index
     the_batch_sample["tokens"] = pad_sequence(token_list, padding_value=dataset.vocab_dict["UNK"])
-
-    # TODO: FIX THE PADDING VALUE, CURRENT PADDING VALUE IS A PLACEHOLDER
-    the_batch_sample["entity_spans"] = pad_sequence(entity_spans_list, padding_value=0)
-    the_batch_sample["element_names"] = pad_sequence(element_names_list, padding_value=0)
+    the_batch_sample["entity_spans"] = pad_sequence(entity_spans_list, padding_value=-1)
+    the_batch_sample["element_names"] = pad_sequence(element_names_list, padding_value=-1)
     the_batch_sample["H"] = pad_sequence(h_list, padding_value=0)
     the_batch_sample["A"] = pad_sequence(a_list, padding_value=0)
     the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
