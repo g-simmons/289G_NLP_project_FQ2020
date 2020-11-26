@@ -117,7 +117,6 @@ def collate_func(data):
 
     # pads each sample content accordingly
     # format is L, B, D where L is the longest length, B is the batch size, D is the dimension size
-
     # sorts entries in token list in descending order
     token_len_list = torch.LongTensor([len(entry) for entry in token_list])
     token_len_list, argsort_list = token_len_list.sort(dim=0, descending=True)
@@ -131,6 +130,7 @@ def collate_func(data):
     s_list = [s_list[index] for index in argsort_list]
     labels_list = [labels_list[index] for index in argsort_list]
 
+    the_batch_sample["tokens_pre-padded_size"] = token_len_list
     the_batch_sample["labels"] = torch.cat(labels_list, dim=0)
     the_batch_sample["entity_spans_pre-padded_size"] = [len(entry) for entry in entity_spans_list]
 
@@ -185,6 +185,7 @@ for epoch in range(EPOCHS):
             batch_sample["T"],
             batch_sample["S"],
             batch_sample["entity_spans_pre-padded_size"],
+            batch_sample["tokens_pre-padded_size"],
         )
 
         predictions = torch.log(raw_predictions)
@@ -226,6 +227,7 @@ for epoch in range(EPOCHS):
                     batch_sample["T"],
                     batch_sample["S"],
                     batch_sample["entity_spans_pre-padded_size"],
+                    batch_sample["tokens_pre-padded_size"],
                     val_batch_size,
                 )
             )

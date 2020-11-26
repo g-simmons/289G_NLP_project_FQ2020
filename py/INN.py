@@ -18,6 +18,7 @@ from config import (
     CELL_STATE_CLAMP_VAL,
     HIDDEN_STATE_CLAMP_VAL
 )
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 
 
 class INNModel(nn.Module):
@@ -143,10 +144,19 @@ class INNModel(nn.Module):
         return to_predict
 
     def forward(self, tokens, entity_spans, element_names,
-                H, T, S, entity_spans_size, curr_batch_size=BATCH_SIZE):
+                H, T, S, entity_spans_size, tokens_size, curr_batch_size=BATCH_SIZE):
 
+        # gets the embedding for each token
         embedded_sentence = self.word_embeddings(tokens)
+
+        # to make computation faster, gets rid of padding by packing the batch tensor
+        # only RNN can use packed tensors
+        embedded_sentence = pack_padded_sequence(embedded_sentence, tokens_size)
         blstm_out, _ = self.blstm(embedded_sentence)
+        # unpacks the output tensor (re-adds the padding) so that other functions can use it
+        blstm_out, _ = pad_packed_sequence(blstm_out)
+
+        # gets the hidden vector for each entity and stores them in H
         H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
         predictions = []
