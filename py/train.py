@@ -110,7 +110,7 @@ def collate_func(data):
         # put the sample's contents into its appropriate list
         token_list.append(curr_sample["tokens"])
         entity_spans_list.append(curr_sample["entity_spans"])
-        element_names_list.append(torch.flatten(curr_sample["element_names"]))  # TODO: FIX IF FLATTENING IS WRONG
+        element_names_list.append(torch.flatten(curr_sample["element_names"]))
         h_list.append(curr_sample["H"])
         a_list.append(curr_sample["A"])
         t_list.append(curr_sample["T"])
@@ -120,33 +120,50 @@ def collate_func(data):
     # pads each sample content accordingly
     # format is L, B, D where L is the longest length, B is the batch size, D is the dimension size
 
-    # pads the tokens with UNK's index
-    the_batch_sample["tokens"] = pad_sequence(token_list, padding_value=dataset.vocab_dict["UNK"])
-    the_batch_sample["entity_spans"] = pad_sequence(entity_spans_list, padding_value=-1)
-    the_batch_sample["element_names"] = pad_sequence(element_names_list, padding_value=-1)
-    the_batch_sample["H"] = pad_sequence(h_list, padding_value=0)
-    the_batch_sample["A"] = pad_sequence(a_list, padding_value=0)
-    the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
-    the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
-    the_batch_sample["labels"] = pad_sequence(labels_list, padding_value=0)
+    the_batch_sample["labels"] = torch.cat(labels_list, dim=0)
+    the_batch_sample["entity_spans_pre-padded_size"] = [len(entry) for entry in entity_spans_list]
+
+    # if the batch size is 1, then we need to add a dimension of size 1 to represent the batch size
+    if len(data) == 1:
+        the_batch_sample["tokens"] = torch.tensor(token_list).unsqueeze(1)
+        the_batch_sample["entity_spans"] = torch.tensor(entity_spans_list).unsqueeze(1)
+        the_batch_sample["element_names"] = torch.tensor(element_names_list).unsqueeze(1)
+        the_batch_sample["H"] = torch.tensor(h_list).unsqueeze(1)
+        the_batch_sample["A"] = torch.tensor(a_list).unsqueeze(1)
+        the_batch_sample["T"] = torch.tensor(t_list).unsqueeze(1)
+        the_batch_sample["S"] = torch.tensor(s_list).unsqueeze(1)
+
+    # if the batch is > 1, then we need to pad the input so that they all have the same dimensions
+    else:
+        the_batch_sample["tokens"] = pad_sequence(token_list, padding_value=dataset.vocab_dict["UNK"])
+        the_batch_sample["entity_spans"] = pad_sequence(entity_spans_list, padding_value=-1)
+        the_batch_sample["element_names"] = pad_sequence(element_names_list, padding_value=-1)
+        the_batch_sample["H"] = pad_sequence(h_list, padding_value=0)
+        the_batch_sample["A"] = pad_sequence(a_list, padding_value=0)
+        the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
+        the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
+
     return the_batch_sample
 
 
 # splits the dataset into a training set and test set
 # TODO: val_idx + train_idx does not add up to the entire dataset (1,100)
-train_set, test_set = random_split(dataset, lengths=[len(train_idx), len(dataset) - len(train_idx)])
+train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(dataset) - len(train_idx)])
 
-# iterator that automatically gives you the next batched samples using the collate function
-data_loader = DataLoader(train_set, collate_fn=collate_func, batch_size=BATCH_SIZE)
+# iterators that automatically give you the next batched samples using the collate function
+train_data_loader = DataLoader(train_set, collate_fn=collate_func, batch_size=BATCH_SIZE)
+val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1)
 
 # training loop
+
+n_iter = 0
 
 # for each epoch
 for epoch in range(EPOCHS):
     print([f"EPOCH {epoch}"])
 
     # iterate over the data loader; data loader gives next batched sample
-    for step, batch_sample in enumerate(data_loader):
+    for step, batch_sample in enumerate(train_data_loader):
         n_iter = (epoch) * len(train_idx) + step
         optimizer.zero_grad()
 
@@ -159,6 +176,7 @@ for epoch in range(EPOCHS):
             batch_sample["A"],
             batch_sample["T"],
             batch_sample["S"],
+            batch_sample["entity_spans_pre-padded_size"],
         )
 
         predictions = torch.log(raw_predictions)
@@ -167,9 +185,12 @@ for epoch in range(EPOCHS):
             print(raw_predictions)
             raise ValueError("NaN loss encountered")
 
+        # keeps track of how many rows in the entity spans there are in total
+        entity_spans_total_num = sum(batch_sample["entity_spans_pre-padded_size"])
+
         # if the model has made predictions on relations.
         # This doesn't happen if there are no possible relations in the sentence given the schema
-        if len(predictions) > len(batch_sample["entity_spans"]):  # TODO: NO LONGER WORKS CORRECTLY
+        if len(predictions) > entity_spans_total_num:
             loss.backward()
             optimizer.step()
             tb.add_scalar("loss", loss, n_iter)
@@ -179,21 +200,23 @@ for epoch in range(EPOCHS):
             tb.add_histogram(param, eval(f"model.{param}"), n_iter)
             tb.flush()
 
+    # validation phase; parameters will not be updated during this time
+    # currently uses a batch size of 1
     with torch.no_grad():
         val_accs = []
         print([f"EPOCH {epoch} VALIDATION"])
-        for step in tqdm(val_idx[0:3]):  # TODO: remove, added for testing
-            sample = process_sample(dataset[step], dataset.inverse_schema)
-            labels = sample["labels"]
+        for step, batch_sample in enumerate(val_data_loader):
+            labels = batch_sample["labels"]
             predictions = torch.argmax(
                 model(
-                    sample["tokens"],
-                    sample["entity_spans"],
-                    sample["element_names"],
-                    sample["H"],
-                    sample["A"],
-                    sample["T"],
-                    sample["S"],
+                    batch_sample["tokens"],
+                    batch_sample["entity_spans"],
+                    batch_sample["element_names"],
+                    batch_sample["H"],
+                    batch_sample["A"],
+                    batch_sample["T"],
+                    batch_sample["S"],
+                    batch_sample["entity_spans_pre-padded_size"],
                 )
             )
             acc = sum(predictions == labels) / len(labels)

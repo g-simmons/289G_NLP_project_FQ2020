@@ -75,7 +75,7 @@ class INNModel(nn.Module):
             nn.Linear(4 * self.hidden_dim, 2),
         )
 
-    def get_h_entities(self, entity_indices, blstm_out, H):
+    def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
         """Apply attention mechanism to entity representation.
 
         Args:
@@ -102,7 +102,7 @@ class INNModel(nn.Module):
             attn_weights = functional.softmax(attn_scores, dim=0)
 
             # for each batch
-            for batch_num in range(BATCH_SIZE):
+            for batch_num in range(curr_batch_size):
                 # gets the current batch's attention weights
                 curr_batch_attn_weights = attn_weights[:, batch_num]
 
@@ -142,48 +142,59 @@ class INNModel(nn.Module):
                     to_predict.append(prediction_candidate)
         return to_predict
 
-    def forward(self, tokens, entity_spans, element_names, H, A, T, S):
+    def forward(self, tokens, entity_spans, element_names,
+                H, A, T, S, entity_spans_size, curr_batch_size=BATCH_SIZE):
 
         embedded_sentence = self.word_embeddings(tokens)
-
-        print("shape 1", embedded_sentence.shape)
         blstm_out, _ = self.blstm(embedded_sentence)
-
-        print("shape 2", blstm_out.shape)
-
-        H = self.get_h_entities(entity_spans, blstm_out, H)
-
-        # predictions = torch.empty((H.shape[0], 2),requires_grad=True)
-
-        # predictions[0 : len(entity_spans)] = torch.tensor(
-        #     [0.001, 0.999]
-        # )  # predict positive for the entities
+        H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
         predictions = []
 
-        for i in range(0,len(entity_spans)):
-            predictions.append(torch.tensor([0.001, 0.999]))
+        # for each batch
+        for batch_num in range(curr_batch_size):
+            predictions_row = []
+            # for each entity span for the current batch
+            for _ in range(entity_spans_size[batch_num]):
+                # add a "prediction" that's basically certain it's right
+                predictions_row.append(torch.tensor([0.001, 0.999]))
+            predictions.append(predictions_row)
 
         c = self.cell.init_cell_state()
 
-        for argset, target_idx, element_name in zip(S, T, element_names):
-            if target_idx >= len(entity_spans) and element_name > -1:
-                args_idx = argset[argset > -1]
-                if torch.all(torch.stack(predictions)[args_idx, 1] > 0.5):
-                    hidden_vectors = H[args_idx]
-                    cell_states = [c for _ in hidden_vectors]
-                    e = self.element_embeddings(element_name)
-                    h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
-                    H[target_idx] = h_out
-                    logits = self.output_linear(h_out)
-                    # predictions[target_idx] = functional.softmax(logits, dim=0)
-                    sm_logits = functional.softmax(logits, dim=0)
-                    predictions.append(sm_logits)
-                else:
-                    predictions.append(torch.tensor([0.999, 0.001]))
-                    predictions[target_idx] = torch.tensor(
-                        [0.999, 0.001]
-                    )  # predict negative if all arguments have not been predicted positive
-        predictions = torch.stack(predictions)
+        # for each batch
+        for batch_num in range(curr_batch_size):
+            # iterates over the current batch's S, T, and element_names
+            # and generates the current batch's predictions
+            for argset, target_idx, element_name in zip(S[:, batch_num], T[:, batch_num],
+                                                        element_names[:, batch_num]):
+
+                if target_idx >= entity_spans_size[batch_num] and element_name > -1:
+                    args_idx = argset[argset > -1]
+
+                    if torch.all(torch.stack(predictions[batch_num])[args_idx, 1] > 0.5):
+                        hidden_vectors = H[args_idx, batch_num]
+                        cell_states = [c for _ in hidden_vectors]
+                        e = self.element_embeddings(element_name)
+
+                        h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
+                        H[target_idx, batch_num] = h_out
+
+                        logits = self.output_linear(h_out)
+                        sm_logits = functional.softmax(logits, dim=0)
+
+                        predictions[batch_num].append(sm_logits)
+
+                    else:
+                        predictions[batch_num].append(torch.tensor([0.999, 0.001]))
+                        predictions[batch_num][target_idx] = torch.tensor(
+                            [0.999, 0.001]
+                        )  # predict negative if all arguments have not been predicted positive
+            # concatenates the batch's predictions along the 0 dimension
+            predictions[batch_num] = torch.stack(predictions[batch_num], dim=0)
+
+        # concatenates all predictions along the 0 dimension; basically a list of predictions
+        # expected to have shape N x 2, where N is the number of predictions
+        predictions = torch.cat(predictions, dim=0)
 
         return predictions
