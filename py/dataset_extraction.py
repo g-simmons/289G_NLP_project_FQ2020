@@ -28,13 +28,13 @@ def create_vocab_dictionary(parser):
 
 # reads in the BioInfer corpus and stores its sentences in a text file called text_sentences.txt
 # each sentence is on its own line; file is used as input for the model
-def create_text_sentences(parser):
-    with open("../data/text_sentences.txt", "w") as file:
-        for s in parser.bioinfer.sentences.sentences:
-            file.write(str(s.getText()) + "\n")
+# def create_text_sentences(parser):
+#     with open("../data/text_sentences.txt", "w") as file:
+#         for s in parser.bioinfer.sentences.sentences:
+#             file.write(str(s.getText()) + "\n")
 
 
 create_vocab_dictionary(parser)
-create_text_sentences(parser)
+# create_text_sentences(parser)
 config = BioInferTaskConfiguration().from_parser(parser)
 config.to_json("../data/configuration.json")

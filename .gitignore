@@ -2,3 +2,4 @@
 *.zip
 py/__pycache__/config.cpython-38.pyc
 .vscode/
+*.pyc
