@@ -101,18 +101,18 @@ class INNModel(nn.Module):
             attn_scores = torch.index_select(attn_scores_out, dim=0, index=idx)
             attn_weights = functional.softmax(attn_scores, dim=0)
 
-            # for each batch
-            for batch_num in range(curr_batch_size):
-                # gets the current batch's attention weights
-                curr_batch_attn_weights = attn_weights[:, batch_num]
+            # for each batch entry
+            for batch_entry_num in range(curr_batch_size):
+                # gets the current batch entry's attention weights
+                curr_batch_attn_weights = attn_weights[:, batch_entry_num]
 
-                # multiplies the current batch's attention weights and current batch's blstm_out
+                # multiplies the current batch entry's attention weights and current batch's blstm_out
                 # creates a T x D matrix where T is the number of tokens and D is blstm_out's dimension
-                h_entity = torch.matmul(curr_batch_attn_weights, blstm_out[i, batch_num].unsqueeze(0))
+                h_entity = torch.matmul(curr_batch_attn_weights, blstm_out[i, batch_entry_num].unsqueeze(0))
 
                 # creates a vector of length D (512) and stores it in H_new
                 h_entity = h_entity.sum(axis=0)
-                H_new[i, batch_num] = h_entity
+                H_new[i, batch_entry_num] = h_entity
         return H_new
 
     def _get_argsets_from_candidates(self, candidates):
@@ -151,47 +151,47 @@ class INNModel(nn.Module):
 
         predictions = []
 
-        # for each batch
-        for batch_num in range(curr_batch_size):
+        # for each batch entry
+        for batch_entry_num in range(curr_batch_size):
             predictions_row = []
-            # for each entity span for the current batch
-            for _ in range(entity_spans_size[batch_num]):
+            # for each entity span for the current batch entry
+            for _ in range(entity_spans_size[batch_entry_num]):
                 # add a "prediction" that's basically certain it's right
                 predictions_row.append(torch.tensor([0.001, 0.999]))
             predictions.append(predictions_row)
 
         c = self.cell.init_cell_state()
 
-        # for each batch
-        for batch_num in range(curr_batch_size):
-            # iterates over the current batch's S, T, and element_names
-            # and generates the current batch's predictions
-            for argset, target_idx, element_name in zip(S[:, batch_num], T[:, batch_num],
-                                                        element_names[:, batch_num]):
+        # for each batch entry
+        for batch_entry_num in range(curr_batch_size):
+            # iterates over the current batch entry's S, T, and element_names
+            # and generates the current batch entry's predictions
+            for argset, target_idx, element_name in zip(S[:, batch_entry_num], T[:, batch_entry_num],
+                                                        element_names[:, batch_entry_num]):
 
-                if target_idx >= entity_spans_size[batch_num] and element_name > -1:
+                if target_idx >= entity_spans_size[batch_entry_num] and element_name > -1:
                     args_idx = argset[argset > -1]
 
-                    if torch.all(torch.stack(predictions[batch_num])[args_idx, 1] > 0.5):
-                        hidden_vectors = H[args_idx, batch_num]
+                    if torch.all(torch.stack(predictions[batch_entry_num])[args_idx, 1] > 0.5):
+                        hidden_vectors = H[args_idx, batch_entry_num]
                         cell_states = [c for _ in hidden_vectors]
                         e = self.element_embeddings(element_name)
 
                         h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
-                        H[target_idx, batch_num] = h_out
+                        H[target_idx, batch_entry_num] = h_out
 
                         logits = self.output_linear(h_out)
                         sm_logits = functional.softmax(logits, dim=0)
 
-                        predictions[batch_num].append(sm_logits)
+                        predictions[batch_entry_num].append(sm_logits)
 
                     else:
-                        predictions[batch_num].append(torch.tensor([0.999, 0.001]))
-                        predictions[batch_num][target_idx] = torch.tensor(
+                        predictions[batch_entry_num].append(torch.tensor([0.999, 0.001]))
+                        predictions[batch_entry_num][target_idx] = torch.tensor(
                             [0.999, 0.001]
                         )  # predict negative if all arguments have not been predicted positive
-            # concatenates the batch's predictions along the 0 dimension
-            predictions[batch_num] = torch.stack(predictions[batch_num], dim=0)
+            # concatenates the batch entry's predictions along the 0 dimension
+            predictions[batch_entry_num] = torch.stack(predictions[batch_entry_num], dim=0)
 
         # concatenates all predictions along the 0 dimension; basically a list of predictions
         # expected to have shape N x 2, where N is the number of predictions
