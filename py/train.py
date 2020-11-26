@@ -166,6 +166,7 @@ for epoch in range(EPOCHS):
     for step, batch_sample in enumerate(train_data_loader):
         n_iter = (epoch) * len(train_idx) + step
         optimizer.zero_grad()
+        val_batch_size = 1
 
         # does a forward pass with the model using the batched sample as input
         raw_predictions = model(
@@ -177,6 +178,7 @@ for epoch in range(EPOCHS):
             batch_sample["T"],
             batch_sample["S"],
             batch_sample["entity_spans_pre-padded_size"],
+            val_batch_size
         )
 
         predictions = torch.log(raw_predictions)
