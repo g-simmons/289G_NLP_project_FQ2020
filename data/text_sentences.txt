@@ -66,6 +66,7 @@ Analysis of the u.v. absorbance and far-u.v. circular dichroism spectra of profi
 Analysis of this product by peptide mapping ( Sutoh ( 1982 ) Biochemistry 21 , 3654-3661 ) showed that cofilin was cross-linked with the N-terminal segment of actin containing residues 1-12 .
 Analysis of V3 , a hamster equivalent of SCID , indicates that the protein level increases of RAD51 and RAD52 from G0 to G1/S/G2 do not require DNA-PK .
 Analysis of various truncated alpha-catenin molecules revealed that amino-terminal residues 48-163 are able to bind to beta-catenin and plakoglobin .
+An assembly of the UL5 and UL52 subunits retains both enzymic activities , and the UL8 protein has been implicated in modulating these functions , facilitating efficient nuclear uptake of the complex and interacting with other viral DNA replication proteins .
 An association was seen between E-cadherin and alpha-catenin expression , in both effusions and solid tumours , and for beta-catenin in solid tumours ( range p<0. 001 to p=0.014 ) .
 An atomic model of actin filaments cross-linked by fimbrin and its implications for bundle assembly and function .
 An oligomeric form of simian virus 40 large T-antigen is immunologically related to the cellular tumor antigen p53 .
@@ -135,6 +136,7 @@ By site-directed mutagenesis of profilin II from Dictyostelium discoideum the po
 By the use of HSV mutants for the UL9 gene we show here that HSV can induce DNA amplification in the absence of lytic viral growth in contrast to replication-negative mutants for either the UL8 or UL52 gene used as control .
 By this method , it was shown that four of these large RNA species are polycistronic transcripts containing sequences from two genes : one species contains nucleocapsid protein ( NP ) and phosphoprotein ( P ) gene sequences ; another , P and membrane protein ( M ) gene sequences ; another , M and fusion protein ( F0 ) gene sequences ; and another , F0 and hemagglutinin-neuraminidase protein ( HN ) gene sequences .
 By two-hybrid screening we have identified two partners that directly associate with TIF34 : PRT1 , a previously characterized eIF3 subunit , and a novel protein of 33 kDa ( eIF3-p33 ) which is part of the eIF3 complex and has an RNA binding domain .
+By using a chromatin immunoprecipitation ( ChIP ) assay , we observed that histone H4 , and not histone H3 , was acetylated from the endogenous p21/waf1 promoter in vivo , implying that CBP/p300 , and not the SAGA complex , was critical in complexing with E2A in up-regulation of p21/waf1 in HTLV-1-infected cells .
 Cadherins are essential for embryonic morphogenesis since they mediate calcium-dependent cell-cell adhesion and can modulate beta-catenin signaling .
 alpha-catenin links beta-catenin to the actin-based cytoskeleton .
 Calculated solution molecular masses are 213 kDa for alpha-catenin , 73 kDa for beta-catenin , and 186 kDa for both .
@@ -171,6 +173,7 @@ Confluent calf pulmonary artery endothelial monolayers exposed to 95 % oxygen fo
 Consistent with the observation that beta-catenin and plakoglobin bind to the same region of alpha-catenin , beta-catenin competed with the binding of plakoglobin to alpha-catenin and vice versa .
 Conversely , inhibition of LIMK 's activity by expressing a dominant negative construct , LIMK1- , or expression of the constitutively active S3A cofilin mutant induces loss of actin filaments at the phagocytic cup and also inhibits phagocytosis .
 Co-precipitation experiments using whole cell lysates indicate that the mutant form of alpha-catenin binds beta-catenin and plakoglobin , and can form a structural complex with E-cadherin via these interactions .
+Coprecipitations revealed that transfected cadherin molecules are complexed with alpha-catenin and beta-catenin at plasma membranes .
 Cotransfections with different combinations of these genes demonstrated that a subset of four of them , coding for the HSV helicase-primase complex ( UL5 , UL8 , UL52 ) and the major DNA-binding protein ( UL29 ) , was already sufficient to mediate the helper effect .
 Crystallization and preliminary crystallographic analysis of the N-terminal actin binding domain of human fimbrin .
 CV-1 cells were transfected with cloned genes from wild-type HPIV-3 encoding the large protein ( L ) , phosphoprotein ( P ) , and nucleocapsid protein ( NP ) , alone or together , for the expression of biologically active proteins .
@@ -536,7 +539,9 @@ No significant changes in glomerular vinculin , talin , beta 1-integrin , or tot
 Notably , the two pro-apoptotic adapter proteins TRADD and FADD are also involved in the activation of A-SMase .
 OBJECTIVE : To determine whether other glycoprotein 130 ( gp130 ) binding cytokines can mimic the effects of oncostatin M ( OSM ) in acting synergistically with interleukin-1alpha ( IL-1alpha ) to induce cartilage collagen breakdown and collagenase expression , and to determine which receptors mediate these effects .
 Of the five major structural proteins of MV , only nucleocapsid ( N ) protein and phosphoprotein ( P protein ) were consistently detected in diseased brain areas .
+p130 and pRb were phosphorylated before the infected myotubes entered S phase , despite the high expression of the cyclin-dependent kinase inhibitor p21 , and E2F was released .
 Once the actin monomer is bound to the filament , the profilin is released , and is available to bind to additional actin monomers .
+One complex is composed of E-cadherin , alpha- and beta-catenin , the other of E-cadherin , alpha-catenin and plakoglobin .
 One involves talin , which has recently been shown to bind actin directly .
 One , MORT1 ( also called FADD ) , binds to Fas/APO1 but not to p55-R ; another , TRADD , binds to the p55 TNF receptor but not to Fas/APO1 ; and the third , RIP , binds weakly to both receptors .
 One mutation , sac6-69 , is in the gene encoding fimbrin , another actin-binding protein , which was expected because null mutations in SAC6 and CAP2 are known to be synthetic-lethal .
@@ -559,6 +564,7 @@ Our in vitro recombinant protein-protein interaction studies demonstrated that S
 Our results define a mechanism for the regulation of cofilin and hence of actin dynamics in vivo .
 Our results provide support for both physical and functional interactions between three subunits , TIF34 , PRT1 and p33 , in the eIF3 complex .
 Our results showed that cell morphology , cell adhesion pattern , actin organization , and distribution of integrin subunits , talin , vinculin , and phosphotyrosine-containing proteins are dependent on the supramolecular organization of the collagens .
+Our results show that the major pool of polymerizable actin monomers is complexed with profilin and spread throughout the cytoplasm .
 Overexpression of a gene fragment encoding the CREB binding domain of CBP stimulates transcription from the PEPCK gene promoter .
 Overexpression of cofilin stimulates bundling of actin filaments , membrane ruffling , and cell movement in Dictyostelium .
 Overexpression of cyclin E and cyclin-dependent kinase inhibitor ( p27Kip1 ) : effect on cell cycle regulation in HeLa cells .
@@ -809,6 +815,7 @@ The NH2-terminal 16kD of Abp1p , a 65-kD yeast protein identified by its ability
 The N-terminal talin polypeptide eventually disrupted actin stress fibres whereas the C-terminal polypeptide was without effect .
 The nucleotide sequences of nucleocapsid ( N ) , phosphoprotein ( P ) , matrix ( M ) , fusion ( F ) , and large protein ( L ) genes were partly determined for 19 wild strains of measles virus ( MV ) isolated over the past 10 years in Japan ( nucleotide position N : 1301-1700 , P : 1751-2190 , M : 3571-4057 , F : 6621-7210 , L : 10381-11133 ) and also for a MV strain obtained from a patient with subacute sclerosing panencephalitis ( SSPE ) who had natural measles in 1980 .
 The observed in vivo expression patterns of alpha-catenin , beta-catenin , and plakoglobin suggest that these proteins are directly linked with the developmental regulation of cell junctions , as cardiac cells become stably committed and phenotypically differentiated to eventually form a mature myocardium .
+The ordered assembly of the talin homologue together with actin and a series of other proteins is considered to play a key role in chemotactic orientation .
 The p120cas gene encodes a protein tyrosine kinase substrate that associates with the cell-cell adhesion protein complex containing E-cadherin and its cytoplasmic cofactors alpha-catenin , beta-catenin , and plakoglobin .
 p27 binds to and inhibits complexes formed by cyclin E-cdk2 , cyclin A-cdk2 , and cyclin D-cdk4 .
 The phosphoprotein was identified as cofilin , an actin-binding protein , and the activation-induced changes in its intracellular distribution have been described elsewhere ( Suzuki et al. , 1995 , J Biol Chem 270:19551-19556 ) .
@@ -848,6 +855,7 @@ The resulting beta-catenin product is unable to bind alpha-catenin that is respo
 The resulting profilin II-peptide complex overcomes the combined capacity of thymosin beta4 and profilin II to inhibit actin nucleation and restores the extent of filament formation .
 The results clearly showed that the mutated cofilin possessing KTLKK instead of KKRKK did not translocate into the nuclei in response to heat shock whereas a recombinant cofilin with the unaltered sequence of KKRKK responded to heat shock and formed intranuclear rods together with actin .
 The results indicate increased fractional synthesis and degradation of myosin heavy chain and light chains , but not actin , in the left compared to the right ventricular free wall .
+The results indicate that ( a ) plakoglobin and beta-catenin differ in their nuclear translocation and complexing with LEF-1 and vinculin ; ( b ) LEF-1-dependent transactivation is preferentially driven by beta-catenin ; and ( c ) the cytoplasmic partners of beta-catenin , cadherin and alpha-catenin , can sequester it to the cytoplasm and inhibit its transcriptional activity .
 The results indicate that S. cerevisiae has two pathways of MSH2-dependent mismatch repair : one that recognized single-base mispairs and requires MSH2 and MSH6 , and a second that recognizes insertion/deletion mispairs and requires a combination of either MSH2 and MSH6 or MSH2 and MSH3 .
 The results provide two independent lines of evidence about the binding sites for actin and poly-L-proline on the profilin molecule .
 The results suggest some cooperativity with respect to cofilin binding to filamentous actin which may be pH dependent .
@@ -900,6 +908,7 @@ These results suggest that the dysfunction of E-cadherin in these cell lines is 
 These results suggest that the heptapeptide sequence is specific for the interaction with actin and , therefore , may constitute part of the actin-binding domain of cofilin .
 These results suggest that the subcellular distribution of cofilin as well as its interaction with actin in vivo is regulated by its phosphorylation and dephosphorylation .
 These results suggest that TNF-alpha can cause apoptosis in pancreatic beta cells through TNFR1-linked apoptotic factors , TRADD , FADD , and FLICE , and TNF-induced ceramide production may be involved in the pathways .
+These results support a model in which EGF stimulation recruits cofilin to the leading edge where its severing activity is activated , leading to the generation of short actin filaments with free barbed ends that participate in the nucleation of actin polymerization .
 The serine phosphatases PP1 and PP2A associate with and activate the actin-binding protein cofilin in human T lymphocytes .
 These separately encoded a complete HPIV3 genome ( negative-sense ) , the HPIV3 nucleocapsid protein N , the phosphoprotein P , and the polymerase protein L .
 These studies suggest that profilin and gelsolin may control the generation of 3-OH phosphorylated phosphoinositides , which in turn may regulate the actin polymerization .
