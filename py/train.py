@@ -97,7 +97,6 @@ def collate_func(data):
     entity_spans_list = []
     element_names_list = []
     h_list = []
-    a_list = []
     t_list = []
     s_list = []
     labels_list = []
@@ -112,13 +111,25 @@ def collate_func(data):
         entity_spans_list.append(curr_sample["entity_spans"])
         element_names_list.append(torch.flatten(curr_sample["element_names"]))
         h_list.append(curr_sample["H"])
-        a_list.append(curr_sample["A"])
         t_list.append(curr_sample["T"])
         s_list.append(curr_sample["S"])
         labels_list.append(curr_sample["labels"])
 
     # pads each sample content accordingly
     # format is L, B, D where L is the longest length, B is the batch size, D is the dimension size
+
+    # sorts entries in token list in descending order
+    token_len_list = torch.LongTensor([len(entry) for entry in token_list])
+    token_len_list, argsort_list = token_len_list.sort(dim=0, descending=True)
+    token_list = [token_list[index] for index in argsort_list]
+
+    # sorts other inputs accordingly to how the token list was sorted
+    entity_spans_list = [entity_spans_list[index] for index in argsort_list]
+    element_names_list = [element_names_list[index] for index in argsort_list]
+    h_list = [h_list[index] for index in argsort_list]
+    t_list = [t_list[index] for index in argsort_list]
+    s_list = [s_list[index] for index in argsort_list]
+    labels_list = [labels_list[index] for index in argsort_list]
 
     the_batch_sample["labels"] = torch.cat(labels_list, dim=0)
     the_batch_sample["entity_spans_pre-padded_size"] = [len(entry) for entry in entity_spans_list]
@@ -129,7 +140,6 @@ def collate_func(data):
         the_batch_sample["entity_spans"] = torch.tensor(entity_spans_list).unsqueeze(1)
         the_batch_sample["element_names"] = torch.tensor(element_names_list).unsqueeze(1)
         the_batch_sample["H"] = torch.tensor(h_list).unsqueeze(1)
-        the_batch_sample["A"] = torch.tensor(a_list).unsqueeze(1)
         the_batch_sample["T"] = torch.tensor(t_list).unsqueeze(1)
         the_batch_sample["S"] = torch.tensor(s_list).unsqueeze(1)
 
@@ -139,7 +149,6 @@ def collate_func(data):
         the_batch_sample["entity_spans"] = pad_sequence(entity_spans_list, padding_value=-1)
         the_batch_sample["element_names"] = pad_sequence(element_names_list, padding_value=-1)
         the_batch_sample["H"] = pad_sequence(h_list, padding_value=0)
-        the_batch_sample["A"] = pad_sequence(a_list, padding_value=0)
         the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
         the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
 
@@ -166,7 +175,6 @@ for epoch in range(EPOCHS):
     for step, batch_sample in enumerate(train_data_loader):
         n_iter = (epoch) * len(train_idx) + step
         optimizer.zero_grad()
-        val_batch_size = 1
 
         # does a forward pass with the model using the batched sample as input
         raw_predictions = model(
@@ -174,11 +182,9 @@ for epoch in range(EPOCHS):
             batch_sample["entity_spans"],
             batch_sample["element_names"],
             batch_sample["H"],
-            batch_sample["A"],
             batch_sample["T"],
             batch_sample["S"],
             batch_sample["entity_spans_pre-padded_size"],
-            val_batch_size
         )
 
         predictions = torch.log(raw_predictions)
@@ -206,6 +212,8 @@ for epoch in range(EPOCHS):
     # currently uses a batch size of 1
     with torch.no_grad():
         val_accs = []
+        val_batch_size = 1
+
         print([f"EPOCH {epoch} VALIDATION"])
         for step, batch_sample in enumerate(val_data_loader):
             labels = batch_sample["labels"]
@@ -215,10 +223,10 @@ for epoch in range(EPOCHS):
                     batch_sample["entity_spans"],
                     batch_sample["element_names"],
                     batch_sample["H"],
-                    batch_sample["A"],
                     batch_sample["T"],
                     batch_sample["S"],
                     batch_sample["entity_spans_pre-padded_size"],
+                    val_batch_size,
                 )
             )
             acc = sum(predictions == labels) / len(labels)

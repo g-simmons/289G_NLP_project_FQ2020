@@ -143,7 +143,7 @@ class INNModel(nn.Module):
         return to_predict
 
     def forward(self, tokens, entity_spans, element_names,
-                H, A, T, S, entity_spans_size, curr_batch_size=BATCH_SIZE):
+                H, T, S, entity_spans_size, curr_batch_size=BATCH_SIZE):
 
         embedded_sentence = self.word_embeddings(tokens)
         blstm_out, _ = self.blstm(embedded_sentence)
