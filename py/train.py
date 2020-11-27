@@ -36,7 +36,6 @@ from config import (
 
 from bioinferdataset import BioInferDataset
 from INN import INNModel
-from utils import process_sample, get_child_indices
 
 # In[2]:
 
@@ -104,7 +103,7 @@ def collate_func(data):
     # for each dataset entry selected to be in the batch
     for index in range(len(data)):
         # extract the entry's sample
-        curr_sample = process_sample(data[index], dataset.inverse_schema)
+        curr_sample = data[index]
 
         # put the sample's contents into its appropriate list
         token_list.append(curr_sample["tokens"])

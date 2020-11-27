@@ -1,6 +1,7 @@
 import sys
 import numpy as np
 import dgl
+import pickle
 
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
 sys.path.append("../py/")
@@ -32,6 +33,69 @@ from config import (
 )
 
 
+def get_child_indices(g, node_idx):
+    return torch.stack(g.out_edges(node_idx))[1].tolist()
+
+
+def process_sample(sample, inverse_schema):
+    element_names = sample["element_names"].numpy()
+    j = len(element_names)
+    element_indices = torch.arange(j)
+
+    S_temp = [
+        nn.functional.pad(e, pad=(0, 2 - len(e)), mode="constant", value=-1)
+        for e in list(element_indices.chunk(j))
+    ]
+    T_temp = element_indices.tolist()
+
+    a = 1  # TODO: only handling single sentences for now
+    A_temp = [a for _ in element_indices]
+    labels_temp = [1 for _ in element_indices]
+
+    max_layers = MAX_LAYERS
+
+    for _ in range(max_layers):
+        ttt = torch.tensor(T_temp)
+        for c in torch.combinations(ttt):  # TODO single-argument relations?
+            e_names = torch.tensor(element_names)[c]
+            key = tuple(sorted(e.item() for e in e_names))
+            if key in inverse_schema.keys():
+                for predicate in inverse_schema[key].keys():
+                    S_temp.append(c)
+                    T_temp.append(j)
+                    A_temp.append(a)
+                    element_names = np.append(element_names, predicate)
+                    L = 0  # default label is false
+                    for i, g in enumerate(sample["relation_graphs"]):
+                        for n in g.nodes():
+                            child_idx = get_child_indices(g, node_idx=n)
+                            child_idx = torch.tensor(
+                                [
+                                    sample["node_idx_to_element_idxs"][i][idx]
+                                    for idx in child_idx
+                                ]
+                            )
+                            if child_idx.shape == c.shape:
+                                # TODO ordering
+                                if (
+                                        child_idx.tolist() == c.tolist()
+                                        and element_names[j] == g.ndata["element_names"][n]
+                                ):  # check if children match and the predicate type is correct
+                                    sample["node_idx_to_element_idxs"][i][n.item()] = j
+                                    L = 1  # this label is true because we found this candidate in the gold standard relation graphs
+                    labels_temp.append(L)
+                    j += 1
+
+    sample["labels"] = torch.tensor(labels_temp, dtype=torch.long)
+    sample["A"] = torch.tensor(A_temp)
+    sample["T"] = torch.tensor(T_temp)
+    sample["S"] = torch.stack(S_temp)
+    sample["element_names"] = torch.tensor(element_names)
+    sample["H"] = torch.randn(sample["A"].shape[0], 2 * HIDDEN_DIM)
+
+    return sample
+
+
 class BioInferDataset(Dataset):
     def __init__(
         self, xml_file, entity_prefix=ENTITY_PREFIX, predicate_prefix=PREDICATE_PREFIX
@@ -50,29 +114,49 @@ class BioInferDataset(Dataset):
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
 
+        self.sample_list = []
+        try:
+            print("loading data...")
+            self.sample_list = pickle.load(open("../data/prepped_dataset.pickle", "rb"))
+        except (OSError, IOError) as e:
+            print("prepped data file not found; prepping data...")
+            self.prep_data()
+            pickle.dump(self.sample_list, open("../data/prepped_dataset.pickle", "wb"))
+
+        print("prepped data is now ready\n")
+        
     def __len__(self):
         return len(self.parser.bioinfer.sentences.sentences)
 
     def __getitem__(self, idx):
-        sentence = self.parser.bioinfer.sentences.sentences[idx]
-        entities, entity_locs = self.get_entities_from_sentence(sentence)
-        entity_names, entity_locs, entity_spans = self.entities_to_tensors(
-            entities, entity_locs
-        )
-        graphs, nkis, node_idx_to_element_idxs = self.get_relation_graphs_from_sentence(
-            sentence, entity_locs
-        )
+        return self.sample_list[idx]
 
-        sample = {
-            "text": sentence.getText(),
-            "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
-            "element_names": entity_names,
-            "element_locs": entity_locs,
-            "entity_spans": entity_spans,
-            "relation_graphs": graphs,
-            "node_idx_to_element_idxs": node_idx_to_element_idxs,
-        }
-        return sample
+    def prep_data(self):
+        """
+        prepares the each data sample using process_sample()
+        stores the result in sample_list
+        """
+
+        for sentence in self.parser.bioinfer.sentences.sentences:
+            entities, entity_locs = self.get_entities_from_sentence(sentence)
+            entity_names, entity_locs, entity_spans = self.entities_to_tensors(
+                entities, entity_locs
+            )
+            graphs, nkis, node_idx_to_element_idxs = self.get_relation_graphs_from_sentence(
+                sentence, entity_locs
+            )
+            sample = {
+                "text": sentence.getText(),
+                "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+                "element_names": entity_names,
+                "element_locs": entity_locs,
+                "entity_spans": entity_spans,
+                "relation_graphs": graphs,
+                "node_idx_to_element_idxs": node_idx_to_element_idxs,
+            }
+
+            prepped_sample = process_sample(sample, self.inverse_schema)
+            self.sample_list.append(prepped_sample)
 
     def create_vocab_dictionary(self, parser):
         vocab = set()
