@@ -42,8 +42,9 @@ from INN import INNModel
 
 dataset = BioInferDataset("../data/BioInfer_corpus_1.1.1.xml")
 
-train_idx = range(0, 880)
-val_idx = range(880, 990)
+train_max_range = round(0.8 * len(dataset))
+train_idx = range(0, train_max_range)
+val_idx = range(train_max_range, 990)
 
 # In[3]:
 
@@ -155,8 +156,7 @@ def collate_func(data):
 
 
 # splits the dataset into a training set and test set
-# TODO: val_idx + train_idx does not add up to the entire dataset (1,100)
-train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(dataset) - len(train_idx)])
+train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
 
 # iterators that automatically give you the next batched samples using the collate function
 train_data_loader = DataLoader(train_set, collate_fn=collate_func, batch_size=BATCH_SIZE)

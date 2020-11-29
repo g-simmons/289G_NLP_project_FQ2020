@@ -124,9 +124,9 @@ class BioInferDataset(Dataset):
             pickle.dump(self.sample_list, open("../data/prepped_dataset.pickle", "wb"))
 
         print("prepped data is now ready\n")
-        
+
     def __len__(self):
-        return len(self.parser.bioinfer.sentences.sentences)
+        return len(self.sample_list)
 
     def __getitem__(self, idx):
         return self.sample_list[idx]
@@ -142,21 +142,23 @@ class BioInferDataset(Dataset):
             entity_names, entity_locs, entity_spans = self.entities_to_tensors(
                 entities, entity_locs
             )
-            graphs, nkis, node_idx_to_element_idxs = self.get_relation_graphs_from_sentence(
-                sentence, entity_locs
-            )
-            sample = {
-                "text": sentence.getText(),
-                "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
-                "element_names": entity_names,
-                "element_locs": entity_locs,
-                "entity_spans": entity_spans,
-                "relation_graphs": graphs,
-                "node_idx_to_element_idxs": node_idx_to_element_idxs,
-            }
 
-            prepped_sample = process_sample(sample, self.inverse_schema)
-            self.sample_list.append(prepped_sample)
+            if len(entity_names) > 0:
+                graphs, nkis, node_idx_to_element_idxs = self.get_relation_graphs_from_sentence(
+                    sentence, entity_locs
+                )
+                sample = {
+                    "text": sentence.getText(),
+                    "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+                    "element_names": entity_names,
+                    "element_locs": entity_locs,
+                    "entity_spans": entity_spans,
+                    "relation_graphs": graphs,
+                    "node_idx_to_element_idxs": node_idx_to_element_idxs,
+                }
+
+                prepped_sample = process_sample(sample, self.inverse_schema)
+                self.sample_list.append(prepped_sample)
 
     def create_vocab_dictionary(self, parser):
         vocab = set()
