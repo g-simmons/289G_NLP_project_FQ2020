@@ -44,7 +44,7 @@ dataset = BioInferDataset("../data/BioInfer_corpus_1.1.1.xml")
 
 train_max_range = round(0.8 * len(dataset))
 train_idx = range(0, train_max_range)
-val_idx = range(train_max_range, 990)
+val_idx = range(train_max_range, len(dataset))
 
 # In[3]:
 
