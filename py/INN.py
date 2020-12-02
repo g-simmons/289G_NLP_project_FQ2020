@@ -156,7 +156,6 @@ class INNModel(nn.Module):
         # unpacks the output tensor (re-adds the padding) so that other functions can use it
         blstm_out, _ = pad_packed_sequence(blstm_out)
 
-        print("success", blstm_out.shape)
         # gets the hidden vector for each entity and stores them in H
         H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 

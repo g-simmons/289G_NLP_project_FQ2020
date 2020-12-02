@@ -108,7 +108,7 @@ def collate_func(data):
 
         # put the sample's contents into its appropriate list
         token_list.append(curr_sample["tokens"])
-        entity_spans_list.append(curr_sample["entity_spans"])
+        entity_spans_list.append(curr_sample["entity_spans"].long())
         element_names_list.append(torch.flatten(curr_sample["element_names"]))
         h_list.append(curr_sample["H"])
         t_list.append(curr_sample["T"])
