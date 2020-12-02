@@ -89,6 +89,7 @@ class INNModel(nn.Module):
                 representation layer.
 
         """
+        print("shape2,", blstm_out.shape)
         H_new = torch.clone(H)
         attn_scores_out = self.attn_scores(blstm_out)
 
@@ -144,7 +145,9 @@ class INNModel(nn.Module):
         return to_predict
 
     def forward(self, tokens, entity_spans, element_names,
-                H, T, S, entity_spans_size, tokens_size, curr_batch_size=BATCH_SIZE):
+                H, T, S, entity_spans_size, tokens_size):
+
+        curr_batch_size = entity_spans.shape[1]
 
         # gets the embedding for each token
         embedded_sentence = self.word_embeddings(tokens)

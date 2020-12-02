@@ -8,7 +8,6 @@ import re
 import sys
 import numpy as np
 import torch
-import dgl
 from torch import nn
 from torch.nn import functional as functional
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
@@ -152,6 +151,7 @@ def collate_func(data):
         the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
         the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
 
+    print("batch, ", the_batch_sample["entity_spans"].shape, the_batch_sample["tokens"].shape)
     return the_batch_sample
 
 
@@ -212,7 +212,6 @@ for epoch in range(EPOCHS):
     # currently uses a batch size of 1
     with torch.no_grad():
         val_accs = []
-        val_batch_size = 1
 
         print([f"EPOCH {epoch} VALIDATION"])
         for step, batch_sample in enumerate(val_data_loader):
@@ -227,7 +226,6 @@ for epoch in range(EPOCHS):
                     batch_sample["S"],
                     batch_sample["entity_spans_pre-padded_size"],
                     batch_sample["tokens_pre-padded_size"],
-                    val_batch_size,
                 )
             )
             acc = sum(predictions == labels) / len(labels)
