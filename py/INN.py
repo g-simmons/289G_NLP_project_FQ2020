@@ -89,7 +89,6 @@ class INNModel(nn.Module):
                 representation layer.
 
         """
-        print("shape2,", blstm_out.shape)
         H_new = torch.clone(H)
         attn_scores_out = self.attn_scores(blstm_out)
 

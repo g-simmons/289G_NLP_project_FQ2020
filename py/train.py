@@ -151,7 +151,6 @@ def collate_func(data):
         the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
         the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
 
-    print("batch, ", the_batch_sample["entity_spans"].shape, the_batch_sample["tokens"].shape)
     return the_batch_sample
 
 
