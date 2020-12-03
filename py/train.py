@@ -135,12 +135,12 @@ def collate_func(data):
 
     # if the batch size is 1, then we need to add a dimension of size 1 to represent the batch size
     if len(data) == 1:
-        the_batch_sample["tokens"] = torch.tensor(token_list).unsqueeze(1)
-        the_batch_sample["entity_spans"] = torch.tensor(entity_spans_list).unsqueeze(1)
-        the_batch_sample["element_names"] = torch.tensor(element_names_list).unsqueeze(1)
-        the_batch_sample["H"] = torch.tensor(h_list).unsqueeze(1)
-        the_batch_sample["T"] = torch.tensor(t_list).unsqueeze(1)
-        the_batch_sample["S"] = torch.tensor(s_list).unsqueeze(1)
+        the_batch_sample["tokens"] = token_list[0].unsqueeze(1)
+        the_batch_sample["entity_spans"] = entity_spans_list[0].unsqueeze(1)
+        the_batch_sample["element_names"] = element_names_list[0].unsqueeze(1)
+        the_batch_sample["H"] = h_list[0].unsqueeze(1)
+        the_batch_sample["T"] = t_list[0].unsqueeze(1)
+        the_batch_sample["S"] = s_list[0].unsqueeze(1)
 
     # if the batch is > 1, then we need to pad the input so that they all have the same dimensions
     else:
