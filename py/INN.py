@@ -106,6 +106,7 @@ class INNModel(pl.LightningModule):
                 # creates a vector of length D (512) and stores it in H_new
                 h_entity = h_entity.sum(axis=0)
                 H_new[i, batch_entry_num] = h_entity
+
         return H_new
 
     def _get_argsets_from_candidates(self, candidates):
@@ -134,43 +135,6 @@ class INNModel(pl.LightningModule):
                     )
                     to_predict.append(prediction_candidate)
         return to_predict
-
-    # def forward(self, tokens, entity_spans, element_names, H, A, T, S):
-
-    #     embedded_sentence = self.word_embeddings(tokens)
-
-    #     blstm_out, _ = self.blstm(
-    #         embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
-    #     )
-
-    #     H = self.get_h_entities(entity_spans, blstm_out, H)
-
-    #     predictions = []
-    #     for i in range(0,len(entity_spans)):
-    #         predictions.append(torch.tensor([0.001, 0.999]).to(self.device))
-
-    #     c = self.cell.init_cell_state()
-    #     c = c.to(self.device)
-
-    #     for argset, target_idx, element_name in zip(S, T, element_names):
-    #         if target_idx >= len(entity_spans):
-    #             args_idx = argset[argset > -1]
-    #             preds = torch.stack(predictions)
-    #             if torch.all(preds[args_idx, 1] > 0.5):
-    #                 hidden_vectors = H[args_idx]
-    #                 cell_states = [c for _ in hidden_vectors]
-    #                 e = self.element_embeddings(element_name)
-    #                 h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
-    #                 H[target_idx] = h_out
-    #                 logits = self.output_linear(h_out)
-    #                 # predictions[target_idx] = functional.softmax(logits, dim=0)
-    #                 sm_logits = functional.softmax(logits, dim=0)
-    #                 predictions.append(sm_logits)
-    #             else:
-    #                 predictions.append(torch.tensor([0.999, 0.001]).to(self.device))
-    #     predictions = torch.stack(predictions)
-
-    #     return predictions
 
     def forward(self, tokens, entity_spans, element_names, T, S, entity_spans_size, tokens_size):
 
@@ -279,7 +243,6 @@ class INNModelLightning(pl.LightningModule):
 
   def training_step(self, batch_sample, batch_idx):
     opt = self.optimizers()
-    # tokens, entity_spans, element_names, T, S, labels = self.expand_batch(batch)
     raw_predictions = self.inn(
                     batch_sample["tokens"],
                     batch_sample["entity_spans"],
@@ -291,13 +254,12 @@ class INNModelLightning(pl.LightningModule):
                 )
     predictions = torch.log(raw_predictions)
     loss = self.criterion(predictions, batch_sample["labels"])
-    if len(predictions) > len(entity_spans):
+    if len(predictions) > len(batch_sample["entity_spans"]):
         self.manual_backward(loss, opt)
         self.manual_optimizer_step(opt)
         self.log('loss',loss)
 
   def validation_step(self, batch_sample, batch_idx):
-    # tokens, entity_spans, element_names, A, T, S, labels = self.expand_batch(batch)
     raw_predictions = self.inn(
                     batch_sample["tokens"],
                     batch_sample["entity_spans"],

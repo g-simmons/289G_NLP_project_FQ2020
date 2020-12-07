@@ -70,7 +70,7 @@ class DAGLSTMCell(pl.LightningModule):
         ioc_hat += self.U_ioc_hat(v)
         ioc_hat += self.b_ioc_hat
         ioc_hat = torch.sigmoid(ioc_hat)
-        i, o, c_hat = torch.chunk(ioc_hat[0], 3)
+        i, o, c_hat = torch.chunk(ioc_hat, 3)
         i, o, c_hat = torch.sigmoid(i), torch.sigmoid(o), torch.tanh(c_hat)
 
         fj_mul_css = []

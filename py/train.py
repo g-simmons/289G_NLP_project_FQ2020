@@ -10,6 +10,7 @@ import dgl
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torch.nn import functional as functional
+from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch.utils.tensorboard import SummaryWriter
 import pytorch_lightning as pl
 from tqdm import tqdm
@@ -125,7 +126,6 @@ if __name__ == "__main__":
             the_batch_sample["element_names"] = pad_sequence(element_names_list, padding_value=-1)
             the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
             the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
-
         return the_batch_sample
 
     # splits the dataset into a training set and test set
@@ -149,6 +149,7 @@ if __name__ == "__main__":
                         automatic_optimization=False,
                         max_steps=1,
                         profiler="advanced")
+
     trainer.fit(model, train_data_loader, val_data_loader)
 
     # # for each epoch
