@@ -36,8 +36,9 @@ from config import (
     MAX_LAYERS,
     MAX_ENTITY_TOKENS,
     PREPPED_DATA_PATH,
-    EXCLUDE_SAMPLES
+    EXCLUDE_SAMPLES,
 )
+
 
 def process_sample(sample, inverse_schema):
     element_names = sample["element_names"].numpy()
@@ -106,6 +107,7 @@ def process_sample(sample, inverse_schema):
 def get_child_indices(g, node_idx):
     return torch.stack(g.out_edges(node_idx))[1].tolist()
 
+
 class BioInferDataset(Dataset):
     def __init__(
         self, xml_file, entity_prefix=ENTITY_PREFIX, predicate_prefix=PREDICATE_PREFIX
@@ -155,7 +157,9 @@ class BioInferDataset(Dataset):
         with Pool() as p:
             self.sample_list = list(
                 tqdm.tqdm(
-                    p.istarmap(process_sample, product(sample_list, [self.inverse_schema]))
+                    p.istarmap(
+                        process_sample, product(sample_list, [self.inverse_schema])
+                    )
                 )
             )
 
@@ -166,7 +170,7 @@ class BioInferDataset(Dataset):
         )
 
         if len(entity_names) == 0:
-            raise ValueError('Should have at least one entity in the sentence')
+            raise ValueError("Should have at least one entity in the sentence")
         (
             graphs,
             nkis,

@@ -33,7 +33,7 @@ from config import (
     CELL_STATE_CLAMP_VAL,
     HIDDEN_STATE_CLAMP_VAL,
     XML_PATH,
-    PREPPED_DATA_PATH
+    PREPPED_DATA_PATH,
 )
 
 from bioinferdataset import BioInferDataset
@@ -109,7 +109,9 @@ if __name__ == "__main__":
 
         the_batch_sample["tokens_pre-padded_size"] = token_len_list
         the_batch_sample["labels"] = torch.cat(labels_list, dim=0)
-        the_batch_sample["entity_spans_pre-padded_size"] = [len(entry) for entry in entity_spans_list]
+        the_batch_sample["entity_spans_pre-padded_size"] = [
+            len(entry) for entry in entity_spans_list
+        ]
 
         # if the batch size is 1, then we need to add a dimension of size 1 to represent the batch size
         if len(data) == 1:
@@ -121,9 +123,15 @@ if __name__ == "__main__":
 
         # if the batch is > 1, then we need to pad the input so that they all have the same dimensions
         else:
-            the_batch_sample["tokens"] = pad_sequence(token_list, padding_value=dataset.vocab_dict["UNK"])
-            the_batch_sample["entity_spans"] = pad_sequence(entity_spans_list, padding_value=-1)
-            the_batch_sample["element_names"] = pad_sequence(element_names_list, padding_value=-1)
+            the_batch_sample["tokens"] = pad_sequence(
+                token_list, padding_value=dataset.vocab_dict["UNK"]
+            )
+            the_batch_sample["entity_spans"] = pad_sequence(
+                entity_spans_list, padding_value=-1
+            )
+            the_batch_sample["element_names"] = pad_sequence(
+                element_names_list, padding_value=-1
+            )
             the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
             the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
         return the_batch_sample
@@ -132,23 +140,28 @@ if __name__ == "__main__":
     train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
 
     # iterators that automatically give you the next batched samples using the collate function
-    train_data_loader = DataLoader(train_set, collate_fn=collate_func, batch_size=BATCH_SIZE)
+    train_data_loader = DataLoader(
+        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE
+    )
     val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1)
 
+    model = INNModelLightning(
+        vocab_dict=dataset.vocab_dict,
+        element_to_idx=dataset.element_to_idx,
+        word_embedding_dim=WORD_EMBEDDING_DIM,
+        relation_embedding_dim=RELATION_EMBEDDING_DIM,
+        hidden_dim=HIDDEN_DIM,
+        cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
+        hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
+    )
 
-    model = INNModelLightning(vocab_dict=dataset.vocab_dict,
-            element_to_idx=dataset.element_to_idx,
-            word_embedding_dim=WORD_EMBEDDING_DIM,
-            relation_embedding_dim=RELATION_EMBEDDING_DIM,
-            hidden_dim=HIDDEN_DIM,
-            cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
-            hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,)
-
-    trainer = pl.Trainer(gpus=GPUS,
-                        progress_bar_refresh_rate=1,
-                        automatic_optimization=False,
-                        max_steps=1,
-                        profiler="advanced")
+    trainer = pl.Trainer(
+        gpus=GPUS,
+        progress_bar_refresh_rate=1,
+        automatic_optimization=False,
+        max_steps=1,
+        profiler="advanced",
+    )
 
     trainer.fit(model, train_data_loader, val_data_loader)
 
@@ -221,7 +234,3 @@ if __name__ == "__main__":
     #         tb.add_scalar("val_acc", val_acc, n_iter)
     #         print("Epoch {:05d} | Val Acc {:.4f} |".format(epoch, val_acc))
     #         tb.flush()
-
-
-
-
