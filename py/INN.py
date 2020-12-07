@@ -277,17 +277,6 @@ class INNModelLightning(pl.LightningModule):
                 )
     return predictions
 
-#   def expand_batch(self, sample):
-#     tokens = sample['tokens']
-#     entity_spans = sample['entity_spans']
-#     element_names = sample['element_names']
-#     T = sample['T']
-#     S = sample['S']
-#     labels = sample['labels']
-#     entity_spans_pre_padded_size = sample["entity_spans_pre-padded_size"]
-#     tokens_pre-padded_size = sample["tokens_pre-padded_size"]
-#     return tokens, entity_spans, element_names, T, S, labels
-
   def training_step(self, batch_sample, batch_idx):
     opt = self.optimizers()
     # tokens, entity_spans, element_names, T, S, labels = self.expand_batch(batch)
