@@ -71,28 +71,41 @@ class INNModel(pl.LightningModule):
             nn.Linear(4 * self.hidden_dim, 2),
         )
 
-    def get_h_entities(self, entity_indices, blstm_out, H):
+    def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
         """Apply attention mechanism to entity representation.
-
         Args:
             entities (list of tuples::(str, (int,))): A list of pairs of an
                 entity label and indices of words.
             blstm_out (torch.Tensor): The output hidden states of bi-LSTM.
-
         Returns:
             h_entities (torch.Tensor): The output hidden states of entity
                 representation layer.
-
         """
         H_new = torch.clone(H)
         attn_scores_out = self.attn_scores(blstm_out)
+
         for i, tok_indices in enumerate(entity_indices):
             idx = tok_indices[tok_indices >= 0]
+
+            if idx.nelement() == 0:
+                # TODO: maybe set corresponding H_new entries to 0
+                continue
+
             attn_scores = torch.index_select(attn_scores_out, dim=0, index=idx)
             attn_weights = functional.softmax(attn_scores, dim=0)
-            h_entity = torch.matmul(attn_weights, blstm_out[idx])
-            h_entity = h_entity.sum(axis=0)
-            H_new[i] = h_entity
+
+            # for each batch entry
+            for batch_entry_num in range(curr_batch_size):
+                # gets the current batch entry's attention weights
+                curr_batch_attn_weights = attn_weights[:, batch_entry_num]
+
+                # multiplies the current batch entry's attention weights and current batch's blstm_out
+                # creates a T x D matrix where T is the number of tokens and D is blstm_out's dimension
+                h_entity = torch.matmul(curr_batch_attn_weights, blstm_out[i, batch_entry_num].unsqueeze(0))
+
+                # creates a vector of length D (512) and stores it in H_new
+                h_entity = h_entity.sum(axis=0)
+                H_new[i, batch_entry_num] = h_entity
         return H_new
 
     def _get_argsets_from_candidates(self, candidates):
@@ -122,40 +135,108 @@ class INNModel(pl.LightningModule):
                     to_predict.append(prediction_candidate)
         return to_predict
 
-    def forward(self, tokens, entity_spans, element_names, H, A, T, S):
+    # def forward(self, tokens, entity_spans, element_names, H, A, T, S):
 
+    #     embedded_sentence = self.word_embeddings(tokens)
+
+    #     blstm_out, _ = self.blstm(
+    #         embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
+    #     )
+
+    #     H = self.get_h_entities(entity_spans, blstm_out, H)
+
+    #     predictions = []
+    #     for i in range(0,len(entity_spans)):
+    #         predictions.append(torch.tensor([0.001, 0.999]).to(self.device))
+
+    #     c = self.cell.init_cell_state()
+    #     c = c.to(self.device)
+
+    #     for argset, target_idx, element_name in zip(S, T, element_names):
+    #         if target_idx >= len(entity_spans):
+    #             args_idx = argset[argset > -1]
+    #             preds = torch.stack(predictions)
+    #             if torch.all(preds[args_idx, 1] > 0.5):
+    #                 hidden_vectors = H[args_idx]
+    #                 cell_states = [c for _ in hidden_vectors]
+    #                 e = self.element_embeddings(element_name)
+    #                 h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
+    #                 H[target_idx] = h_out
+    #                 logits = self.output_linear(h_out)
+    #                 # predictions[target_idx] = functional.softmax(logits, dim=0)
+    #                 sm_logits = functional.softmax(logits, dim=0)
+    #                 predictions.append(sm_logits)
+    #             else:
+    #                 predictions.append(torch.tensor([0.999, 0.001]).to(self.device))
+    #     predictions = torch.stack(predictions)
+
+    #     return predictions
+
+    def forward(self, tokens, entity_spans, element_names, T, S, entity_spans_size, tokens_size):
+
+        curr_batch_size = entity_spans.shape[1]
+
+        # gets the embedding for each token
         embedded_sentence = self.word_embeddings(tokens)
 
-        blstm_out, _ = self.blstm(
-            embedded_sentence.view(embedded_sentence.shape[0], 1, -1)
-        )
+        # to make computation faster, gets rid of padding by packing the batch tensor
+        # only RNN can use packed tensors
+        embedded_sentence = pack_padded_sequence(embedded_sentence, tokens_size)
+        blstm_out, _ = self.blstm(embedded_sentence)
+        # unpacks the output tensor (re-adds the padding) so that other functions can use it
+        blstm_out, _ = pad_packed_sequence(blstm_out)
 
-        H = self.get_h_entities(entity_spans, blstm_out, H)
+        # gets the hidden vector for each entity and stores them in H
+        H = torch.randn(T.shape[0], curr_batch_size, 2 * HIDDEN_DIM).detach()
+        H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
         predictions = []
-        for i in range(0,len(entity_spans)):
-            predictions.append(torch.tensor([0.001, 0.999]).to(self.device))
+
+        # for each batch entry
+        for batch_entry_num in range(curr_batch_size):
+            predictions_row = []
+            # for each entity span for the current batch entry
+            for _ in range(entity_spans_size[batch_entry_num]):
+                # add a "prediction" that's basically certain it's right
+                predictions_row.append(torch.tensor([0.001, 0.999]))
+            predictions.append(predictions_row)
 
         c = self.cell.init_cell_state()
-        c = c.to(self.device)
 
-        for argset, target_idx, element_name in zip(S, T, element_names):
-            if target_idx >= len(entity_spans):
-                args_idx = argset[argset > -1]
-                preds = torch.stack(predictions)
-                if torch.all(preds[args_idx, 1] > 0.5):
-                    hidden_vectors = H[args_idx]
-                    cell_states = [c for _ in hidden_vectors]
-                    e = self.element_embeddings(element_name)
-                    h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
-                    H[target_idx] = h_out
-                    logits = self.output_linear(h_out)
-                    # predictions[target_idx] = functional.softmax(logits, dim=0)
-                    sm_logits = functional.softmax(logits, dim=0)
-                    predictions.append(sm_logits)
-                else:
-                    predictions.append(torch.tensor([0.999, 0.001]).to(self.device))
-        predictions = torch.stack(predictions)
+        # for each batch entry
+        for batch_entry_num in range(curr_batch_size):
+            # iterates over the current batch entry's S, T, and element_names
+            # and generates the current batch entry's predictions
+            for argset, target_idx, element_name in zip(S[:, batch_entry_num], T[:, batch_entry_num],
+                                                        element_names[:, batch_entry_num]):
+
+                if target_idx >= entity_spans_size[batch_entry_num] and element_name > -1:
+                    args_idx = argset[argset > -1]
+
+                    if torch.all(torch.stack(predictions[batch_entry_num])[args_idx, 1] > 0.5):
+                        hidden_vectors = H[args_idx, batch_entry_num]
+                        cell_states = [c for _ in hidden_vectors]
+                        e = self.element_embeddings(element_name)
+
+                        h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
+                        H[target_idx, batch_entry_num] = h_out
+
+                        logits = self.output_linear(h_out)
+                        sm_logits = functional.softmax(logits, dim=0)
+
+                        predictions[batch_entry_num].append(sm_logits)
+
+                    else:
+                        predictions[batch_entry_num].append(torch.tensor([0.999, 0.001]))
+                        predictions[batch_entry_num][target_idx] = torch.tensor(
+                            [0.999, 0.001]
+                        )  # predict negative if all arguments have not been predicted positive
+            # concatenates the batch entry's predictions along the 0 dimension
+            predictions[batch_entry_num] = torch.stack(predictions[batch_entry_num], dim=0)
+
+        # concatenates all predictions along the 0 dimension; basically a list of predictions
+        # expected to have shape N x 2, where N is the number of predictions
+        predictions = torch.cat(predictions, dim=0)
 
         return predictions
 
@@ -183,96 +264,63 @@ class INNModelLightning(pl.LightningModule):
     self.param_names = [p[0] for p in self.inn.named_parameters()]
     self.tb = SummaryWriter()
 
-  def forward(self, x):
-    tokens, entity_spans, element_names, A, T, S, labels = self.expand_batch(x)
-    predictions = self.inn(tokens, entity_spans, element_names, A, T, S)
+  def forward(self, batch_sample):
+    predictions = self.inn(
+                    batch_sample["tokens"],
+                    batch_sample["entity_spans"],
+                    batch_sample["element_names"],
+                    batch_sample["H"],
+                    batch_sample["T"],
+                    batch_sample["S"],
+                    batch_sample["entity_spans_pre-padded_size"],
+                    batch_sample["tokens_pre-padded_size"],
+                )
     return predictions
 
-  def expand_batch(self, batch):
-    tokens = sample['tokens']
-    entity_spans = sample['entity_spans']
-    element_names = sample['element_names']
-    A = sample['A']
-    T = sample['T']
-    S = sample['S']
-    labels = sample['labels']
-    return tokens, entity_spans, element_names, A, T, S, labels
+#   def expand_batch(self, sample):
+#     tokens = sample['tokens']
+#     entity_spans = sample['entity_spans']
+#     element_names = sample['element_names']
+#     T = sample['T']
+#     S = sample['S']
+#     labels = sample['labels']
+#     entity_spans_pre_padded_size = sample["entity_spans_pre-padded_size"]
+#     tokens_pre-padded_size = sample["tokens_pre-padded_size"]
+#     return tokens, entity_spans, element_names, T, S, labels
 
-  def training_step(self, batch, batch_idx):
+  def training_step(self, batch_sample, batch_idx):
     opt = self.optimizers()
-    tokens, entity_spans, element_names, A, T, S, labels = self.expand_batch(batch)
-    raw_predictions = self.inn(tokens, entity_spans, element_names, A, T, S)
+    # tokens, entity_spans, element_names, T, S, labels = self.expand_batch(batch)
+    raw_predictions = self.inn(
+                    batch_sample["tokens"],
+                    batch_sample["entity_spans"],
+                    batch_sample["element_names"],
+                    batch_sample["T"],
+                    batch_sample["S"],
+                    batch_sample["entity_spans_pre-padded_size"],
+                    batch_sample["tokens_pre-padded_size"],
+                )
     predictions = torch.log(raw_predictions)
-    loss = self.criterion(predictions, labels)
+    loss = self.criterion(predictions, batch_sample["labels"])
     if len(predictions) > len(entity_spans):
         self.manual_backward(loss, opt)
         self.manual_optimizer_step(opt)
         self.log('loss',loss)
 
-  def validation_step(self, batch, batch_idx):
-    tokens, entity_spans, element_names, A, T, S, labels = self.expand_batch(batch)
-    raw_predictions = self.inn(tokens, entity_spans, element_names, A, T, S)
+  def validation_step(self, batch_sample, batch_idx):
+    # tokens, entity_spans, element_names, A, T, S, labels = self.expand_batch(batch)
+    raw_predictions = self.inn(
+                    batch_sample["tokens"],
+                    batch_sample["entity_spans"],
+                    batch_sample["element_names"],
+                    batch_sample["T"],
+                    batch_sample["S"],
+                    batch_sample["entity_spans_pre-padded_size"],
+                    batch_sample["tokens_pre-padded_size"],
+                )
     predictions = torch.log(raw_predictions)
-    loss = self.criterion(predictions, labels)
+    loss = self.criterion(predictions, batch_sample["labels"])
     return loss
-
-  def process_sample(self, sample, inverse_schema):
-    element_names = sample["element_names"]
-    j = len(element_names)
-    element_indices = torch.arange(j)
-
-    S_temp = [
-        nn.functional.pad(e, pad=(0, 2 - len(e)), mode="constant", value=-1)
-        for e in list(element_indices.chunk(j))
-    ]
-    T_temp = element_indices.tolist()
-
-    a = 1  # TODO: only handling single sentences for now
-    A_temp = [a for _ in element_indices]
-    labels_temp = [1 for _ in element_indices]
-
-    max_layers = MAX_LAYERS
-
-    for _ in range(max_layers):
-        ttt = torch.tensor(T_temp)
-        for c in torch.combinations(ttt):  # TODO single-argument relations?
-            e_names = torch.tensor(element_names)[c]
-            key = tuple(sorted(e.item() for e in e_names))
-            if key in inverse_schema.keys():
-                for predicate in inverse_schema[key].keys():
-                    S_temp.append(c)
-                    T_temp.append(j)
-                    A_temp.append(a)
-                    element_names = torch.cat((element_names, torch.tensor([[predicate]]).to(self.device)))
-                    L = 0  # default label is false
-                    for i, g in enumerate(sample["relation_graphs"]):
-                        for n in g.nodes():
-                            child_idx = get_child_indices(g, node_idx=n)
-                            child_idx = torch.tensor(
-                                [
-                                    sample["node_idx_to_element_idxs"][i][idx]
-                                    for idx in child_idx
-                                ]
-                            )
-                            if child_idx.shape == c.shape:
-                                # TODO ordering
-                                if (
-                                    child_idx.tolist() == c.tolist()
-                                    and element_names[j] == g.ndata["element_names"][n]
-                                ):  # check if children match and the predicate type is correct
-                                    sample["node_idx_to_element_idxs"][i][n.item()] = j
-                                    L = 1  # this label is true because we found this candidate in the gold standard relation graphs
-                    labels_temp.append(L)
-                    j += 1
-
-    sample["labels"] = torch.tensor(labels_temp, dtype=torch.long).to(self.device)
-    sample["A"] = torch.tensor(A_temp).to(self.device)
-    sample["T"] = torch.tensor(T_temp).to(self.device)
-    sample["S"] = torch.stack(S_temp).to(self.device)
-    sample["element_names"] = torch.tensor(element_names).to(self.device)
-    sample["H"] = torch.randn(sample["A"].shape[0], 2 * HIDDEN_DIM).to(self.device)
-
-    return sample
 
   def configure_optimizers(self):
     optimizer = torch.optim.Adadelta(
