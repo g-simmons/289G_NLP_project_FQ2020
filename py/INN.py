@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as functional
+from torch.utils.tensorboard import SummaryWriter
 
 from daglstmcell import DAGLSTMCell
 
@@ -16,12 +17,13 @@ from config import (
     MAX_LAYERS,
     MAX_ENTITY_TOKENS,
     CELL_STATE_CLAMP_VAL,
-    HIDDEN_STATE_CLAMP_VAL
+    HIDDEN_STATE_CLAMP_VAL,
 )
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+import pytorch_lightning as pl
 
 
-class INNModel(nn.Module):
+class INNModel(pl.LightningModule):
     """INN model configuration.
 
     Parameters:
@@ -40,8 +42,9 @@ class INNModel(nn.Module):
         word_embedding_dim,
         relation_embedding_dim,
         hidden_dim,
+        cell,
         cell_state_clamp_val,
-        hidden_state_clamp_val
+        hidden_state_clamp_val,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -63,13 +66,7 @@ class INNModel(nn.Module):
             num_layers=1,
         )
 
-        self.cell = DAGLSTMCell(
-            hidden_dim=2 * self.hidden_dim,
-            relation_embedding_dim=self.relation_embedding_dim,
-            max_inputs=2,
-            hidden_state_clamp_val=hidden_state_clamp_val,
-            cell_state_clamp_val=cell_state_clamp_val,
-        )
+        self.cell = cell
 
         self.output_linear = nn.Sequential(
             nn.Linear(2 * self.hidden_dim, 4 * self.hidden_dim),
@@ -78,16 +75,13 @@ class INNModel(nn.Module):
 
     def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
         """Apply attention mechanism to entity representation.
-
         Args:
             entities (list of tuples::(str, (int,))): A list of pairs of an
                 entity label and indices of words.
             blstm_out (torch.Tensor): The output hidden states of bi-LSTM.
-
         Returns:
             h_entities (torch.Tensor): The output hidden states of entity
                 representation layer.
-
         """
         H_new = torch.clone(H)
         attn_scores_out = self.attn_scores(blstm_out)
@@ -109,11 +103,14 @@ class INNModel(nn.Module):
 
                 # multiplies the current batch entry's attention weights and current batch's blstm_out
                 # creates a T x D matrix where T is the number of tokens and D is blstm_out's dimension
-                h_entity = torch.matmul(curr_batch_attn_weights, blstm_out[i, batch_entry_num].unsqueeze(0))
+                h_entity = torch.matmul(
+                    curr_batch_attn_weights, blstm_out[i, batch_entry_num].unsqueeze(0)
+                )
 
                 # creates a vector of length D (512) and stores it in H_new
                 h_entity = h_entity.sum(axis=0)
                 H_new[i, batch_entry_num] = h_entity
+
         return H_new
 
     def _get_argsets_from_candidates(self, candidates):
@@ -143,8 +140,9 @@ class INNModel(nn.Module):
                     to_predict.append(prediction_candidate)
         return to_predict
 
-    def forward(self, tokens, entity_spans, element_names,
-                H, T, S, entity_spans_size, tokens_size):
+    def forward(
+        self, tokens, entity_spans, element_names, T, S, entity_spans_size, tokens_size
+    ):
 
         curr_batch_size = entity_spans.shape[1]
 
@@ -159,6 +157,7 @@ class INNModel(nn.Module):
         blstm_out, _ = pad_packed_sequence(blstm_out)
 
         # gets the hidden vector for each entity and stores them in H
+        H = torch.randn(T.shape[0], curr_batch_size, 2 * HIDDEN_DIM).detach()
         H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
         predictions = []
@@ -178,13 +177,21 @@ class INNModel(nn.Module):
         for batch_entry_num in range(curr_batch_size):
             # iterates over the current batch entry's S, T, and element_names
             # and generates the current batch entry's predictions
-            for argset, target_idx, element_name in zip(S[:, batch_entry_num], T[:, batch_entry_num],
-                                                        element_names[:, batch_entry_num]):
+            for argset, target_idx, element_name in zip(
+                S[:, batch_entry_num],
+                T[:, batch_entry_num],
+                element_names[:, batch_entry_num],
+            ):
 
-                if target_idx >= entity_spans_size[batch_entry_num] and element_name > -1:
+                if (
+                    target_idx >= entity_spans_size[batch_entry_num]
+                    and element_name > -1
+                ):
                     args_idx = argset[argset > -1]
 
-                    if torch.all(torch.stack(predictions[batch_entry_num])[args_idx, 1] > 0.5):
+                    if torch.all(
+                        torch.stack(predictions[batch_entry_num])[args_idx, 1] > 0.5
+                    ):
                         hidden_vectors = H[args_idx, batch_entry_num]
                         cell_states = [c for _ in hidden_vectors]
                         e = self.element_embeddings(element_name)
@@ -198,15 +205,102 @@ class INNModel(nn.Module):
                         predictions[batch_entry_num].append(sm_logits)
 
                     else:
-                        predictions[batch_entry_num].append(torch.tensor([0.999, 0.001]))
+                        predictions[batch_entry_num].append(
+                            torch.tensor([0.999, 0.001])
+                        )
                         predictions[batch_entry_num][target_idx] = torch.tensor(
                             [0.999, 0.001]
                         )  # predict negative if all arguments have not been predicted positive
             # concatenates the batch entry's predictions along the 0 dimension
-            predictions[batch_entry_num] = torch.stack(predictions[batch_entry_num], dim=0)
+            predictions[batch_entry_num] = torch.stack(
+                predictions[batch_entry_num], dim=0
+            )
 
         # concatenates all predictions along the 0 dimension; basically a list of predictions
         # expected to have shape N x 2, where N is the number of predictions
         predictions = torch.cat(predictions, dim=0)
 
         return predictions
+
+
+class INNModelLightning(pl.LightningModule):
+    def __init__(
+        self,
+        vocab_dict,
+        element_to_idx,
+        word_embedding_dim,
+        relation_embedding_dim,
+        hidden_dim,
+        cell_state_clamp_val,
+        hidden_state_clamp_val,
+    ):
+        super().__init__()
+        self.cell = DAGLSTMCell(
+            hidden_dim=2 * hidden_dim,
+            relation_embedding_dim=relation_embedding_dim,
+            max_inputs=2,
+            hidden_state_clamp_val=hidden_state_clamp_val,
+            cell_state_clamp_val=cell_state_clamp_val,
+        )
+        self.inn = INNModel(
+            vocab_dict=vocab_dict,
+            element_to_idx=element_to_idx,
+            word_embedding_dim=word_embedding_dim,
+            relation_embedding_dim=relation_embedding_dim,
+            hidden_dim=hidden_dim,
+            cell=self.cell,
+            cell_state_clamp_val=cell_state_clamp_val,
+            hidden_state_clamp_val=hidden_state_clamp_val,
+        )
+        self.criterion = nn.NLLLoss()
+        self.param_names = [p[0] for p in self.inn.named_parameters()]
+        self.tb = SummaryWriter()
+
+    def forward(self, batch_sample):
+        predictions = self.inn(
+            batch_sample["tokens"],
+            batch_sample["entity_spans"],
+            batch_sample["element_names"],
+            batch_sample["H"],
+            batch_sample["T"],
+            batch_sample["S"],
+            batch_sample["entity_spans_pre-padded_size"],
+            batch_sample["tokens_pre-padded_size"],
+        )
+        return predictions
+
+    def training_step(self, batch_sample, batch_idx):
+        opt = self.optimizers()
+        raw_predictions = self.inn(
+            batch_sample["tokens"],
+            batch_sample["entity_spans"],
+            batch_sample["element_names"],
+            batch_sample["T"],
+            batch_sample["S"],
+            batch_sample["entity_spans_pre-padded_size"],
+            batch_sample["tokens_pre-padded_size"],
+        )
+        predictions = torch.log(raw_predictions)
+        loss = self.criterion(predictions, batch_sample["labels"])
+        if len(predictions) > len(batch_sample["entity_spans"]):
+            self.manual_backward(loss, opt)
+            self.manual_optimizer_step(opt)
+            self.log("loss", loss)
+
+    def validation_step(self, batch_sample, batch_idx):
+        raw_predictions = self.inn(
+            batch_sample["tokens"],
+            batch_sample["entity_spans"],
+            batch_sample["element_names"],
+            batch_sample["T"],
+            batch_sample["S"],
+            batch_sample["entity_spans_pre-padded_size"],
+            batch_sample["tokens_pre-padded_size"],
+        )
+        predictions = torch.log(raw_predictions)
+        loss = self.criterion(predictions, batch_sample["labels"])
+        return loss
+
+    def configure_optimizers(self):
+        optimizer = torch.optim.Adadelta(self.parameters(), lr=1.0)
+        return optimizer
