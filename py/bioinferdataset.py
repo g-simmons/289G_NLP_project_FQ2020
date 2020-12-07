@@ -19,6 +19,11 @@ import torch
 from torch import nn
 from torch.nn import functional as functional
 
+import tqdm
+from multiprocessing import Pool
+from itertools import product
+import istarmap
+
 from config import (
     ENTITY_PREFIX,
     PREDICATE_PREFIX,
@@ -30,12 +35,9 @@ from config import (
     BATCH_SIZE,
     MAX_LAYERS,
     MAX_ENTITY_TOKENS,
+    PREPPED_DATA_PATH,
+    EXCLUDE_SAMPLES
 )
-
-
-def get_child_indices(g, node_idx):
-    return torch.stack(g.out_edges(node_idx))[1].tolist()
-
 
 def process_sample(sample, inverse_schema):
     element_names = sample["element_names"].numpy()
@@ -78,8 +80,8 @@ def process_sample(sample, inverse_schema):
                             if child_idx.shape == c.shape:
                                 # TODO ordering
                                 if (
-                                        child_idx.tolist() == c.tolist()
-                                        and element_names[j] == g.ndata["element_names"][n]
+                                    child_idx.tolist() == c.tolist()
+                                    and element_names[j] == g.ndata["element_names"][n]
                                 ):  # check if children match and the predicate type is correct
                                     sample["node_idx_to_element_idxs"][i][n.item()] = j
                                     L = 1  # this label is true because we found this candidate in the gold standard relation graphs
@@ -91,10 +93,18 @@ def process_sample(sample, inverse_schema):
     sample["T"] = torch.tensor(T_temp)
     sample["S"] = torch.stack(S_temp)
     sample["element_names"] = torch.tensor(element_names)
-    sample["H"] = torch.randn(sample["A"].shape[0], 2 * HIDDEN_DIM)
+
+    # only need tokens, entity_spans, element_names, A, T, S, labels
+    del sample["relation_graphs"]
+    del sample["node_idx_to_element_idxs"]
+    del sample["text"]
+    del sample["element_locs"]
 
     return sample
 
+
+def get_child_indices(g, node_idx):
+    return torch.stack(g.out_edges(node_idx))[1].tolist()
 
 class BioInferDataset(Dataset):
     def __init__(
@@ -103,9 +113,9 @@ class BioInferDataset(Dataset):
         self.entity_prefix = entity_prefix
         self.predicate_prefix = predicate_prefix
         self.parser = BIParser()
+        self.sample_list = []
         with open(xml_file, "r") as f:
             self.parser.parse(f)
-
         self.vocab_dict = self.create_vocab_dictionary(self.parser)
         entities = self.get_entities(self.parser)
         predicates = self.get_predicates(self.parser)
@@ -114,51 +124,64 @@ class BioInferDataset(Dataset):
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
 
-        self.sample_list = []
-        try:
-            print("loading data...")
-            self.sample_list = pickle.load(open("../data/prepped_dataset.pickle", "rb"))
-        except (OSError, IOError) as e:
-            print("prepped data file not found; prepping data...")
-            self.prep_data()
-            pickle.dump(self.sample_list, open("../data/prepped_dataset.pickle", "wb"))
-
-        print("prepped data is now ready\n")
-
     def __len__(self):
         return len(self.sample_list)
 
     def __getitem__(self, idx):
         return self.sample_list[idx]
 
+    def load_samples_from_pickle(self, pickle_file=PREPPED_DATA_PATH):
+        print("loading data...")
+        self.sample_list = pickle.load(open(pickle_file, "rb"))
+        return self
+
+    def samples_to_pickle(self, pickle_file=PREPPED_DATA_PATH):
+        pickle.dump(self.sample_list, open(pickle_file, "wb"))
+
     def prep_data(self):
         """
         prepares the each data sample using process_sample()
         stores the result in sample_list
         """
-
-        for sentence in self.parser.bioinfer.sentences.sentences:
-            entities, entity_locs = self.get_entities_from_sentence(sentence)
-            entity_names, entity_locs, entity_spans = self.entities_to_tensors(
-                entities, entity_locs
+        print("prepping data...")
+        sample_list = tqdm.tqdm(
+            [
+                self.process_sentence(sent, self.inverse_schema)
+                for i, sent in enumerate(self.parser.bioinfer.sentences.sentences)
+                if i not in EXCLUDE_SAMPLES
+            ]
+        )
+        print("processing data...")
+        with Pool() as p:
+            self.sample_list = list(
+                tqdm.tqdm(
+                    p.istarmap(process_sample, product(sample_list, [self.inverse_schema]))
+                )
             )
 
-            if len(entity_names) > 0:
-                graphs, nkis, node_idx_to_element_idxs = self.get_relation_graphs_from_sentence(
-                    sentence, entity_locs
-                )
-                sample = {
-                    "text": sentence.getText(),
-                    "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
-                    "element_names": entity_names,
-                    "element_locs": entity_locs,
-                    "entity_spans": entity_spans,
-                    "relation_graphs": graphs,
-                    "node_idx_to_element_idxs": node_idx_to_element_idxs,
-                }
+    def process_sentence(self, sentence, inverse_schema):
+        entities, entity_locs = self.get_entities_from_sentence(sentence)
+        entity_names, entity_locs, entity_spans = self.entities_to_tensors(
+            entities, entity_locs
+        )
 
-                prepped_sample = process_sample(sample, self.inverse_schema)
-                self.sample_list.append(prepped_sample)
+        if len(entity_names) == 0:
+            raise ValueError('Should have at least one entity in the sentence')
+        (
+            graphs,
+            nkis,
+            node_idx_to_element_idxs,
+        ) = self.get_relation_graphs_from_sentence(sentence, entity_locs)
+        sample = {
+            "text": sentence.getText(),
+            "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+            "element_names": entity_names,
+            "element_locs": entity_locs,
+            "entity_spans": entity_spans,
+            "relation_graphs": graphs,
+            "node_idx_to_element_idxs": node_idx_to_element_idxs,
+        }
+        return sample
 
     def create_vocab_dictionary(self, parser):
         vocab = set()

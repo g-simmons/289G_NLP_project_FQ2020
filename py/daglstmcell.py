@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from torch.nn import functional as functional
+import pytorch_lightning as pl
 
 from config import (
     ENTITY_PREFIX,
@@ -17,8 +18,7 @@ from config import (
     HIDDEN_STATE_CLAMP_VAL
 )
 
-
-class DAGLSTMCell(nn.Module):
+class DAGLSTMCell(pl.LightningModule):
     # credit to https://github.com/dmlc/dgl/tree/master/examples/pytorch/tree_lstm for the
     # original tree-lstm implementation, modified here
     def __init__(
@@ -70,7 +70,7 @@ class DAGLSTMCell(nn.Module):
         ioc_hat += self.U_ioc_hat(v)
         ioc_hat += self.b_ioc_hat
         ioc_hat = torch.sigmoid(ioc_hat)
-        i, o, c_hat = torch.chunk(ioc_hat, 3)
+        i, o, c_hat = torch.chunk(ioc_hat[0], 3)
         i, o, c_hat = torch.sigmoid(i), torch.sigmoid(o), torch.tanh(c_hat)
 
         fj_mul_css = []
