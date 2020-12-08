@@ -254,7 +254,6 @@ class INNModelLightning(pl.LightningModule):
         )
         self.criterion = nn.NLLLoss()
         self.param_names = [p[0] for p in self.inn.named_parameters()]
-        self.tb = SummaryWriter()
 
     def forward(self, batch_sample):
         predictions = self.inn(
