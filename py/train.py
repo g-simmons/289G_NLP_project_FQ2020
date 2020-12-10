@@ -38,6 +38,8 @@ from config import (
     PREPPED_DATA_PATH,
 )
 
+BATCH_SIZE = 1
+
 from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
 from daglstmcell import DAGLSTMCell
@@ -157,14 +159,14 @@ if __name__ == "__main__":
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
     )
 
-    wandb_logger = WandbLogger(name='test',project='nested-relation-extraction')
+    wandb_logger = WandbLogger(name='test-noclamp',project='nested-relation-extraction')
     wandb_logger.watch(model,log='gradients',log_freq=1)
 
     trainer = pl.Trainer(
         gpus=GPUS,
         progress_bar_refresh_rate=1,
         automatic_optimization=False,
-        max_steps=1,
+        max_steps=50,
         # profiler="advanced",
         logger= wandb_logger
     )

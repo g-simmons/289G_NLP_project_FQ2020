@@ -73,6 +73,7 @@ class INNModel(pl.LightningModule):
             nn.Linear(4 * self.hidden_dim, 2),
         )
 
+
     def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
         """Apply attention mechanism to entity representation.
         Args:
@@ -254,7 +255,6 @@ class INNModelLightning(pl.LightningModule):
         )
         self.criterion = nn.NLLLoss()
         self.param_names = [p[0] for p in self.inn.named_parameters()]
-        self.tb = SummaryWriter()
 
     def forward(self, batch_sample):
         predictions = self.inn(
@@ -285,7 +285,7 @@ class INNModelLightning(pl.LightningModule):
         if len(predictions) > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
             self.manual_optimizer_step(opt)
-            self.log("loss", loss)
+            self.logger.experiment.log({"loss": loss})
 
     def validation_step(self, batch_sample, batch_idx):
         raw_predictions = self.inn(
@@ -299,6 +299,7 @@ class INNModelLightning(pl.LightningModule):
         )
         predictions = torch.log(raw_predictions)
         loss = self.criterion(predictions, batch_sample["labels"])
+        self.logger.experiment.log({"val_loss": loss})
         return loss
 
     def configure_optimizers(self):
