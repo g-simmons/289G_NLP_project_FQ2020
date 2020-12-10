@@ -1,3 +1,5 @@
 __pycache__/
 runs
 lightning_logs
+wandb
+nested-relation-extraction

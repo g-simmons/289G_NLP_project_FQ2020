@@ -13,8 +13,10 @@ from torch.nn import functional as functional
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch.utils.tensorboard import SummaryWriter
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
 from tqdm import tqdm
 from pathlib import Path
+import wandb
 
 sys.path.append("../py")
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
@@ -155,12 +157,16 @@ if __name__ == "__main__":
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
     )
 
+    wandb_logger = WandbLogger(name='test',project='nested-relation-extraction')
+    wandb_logger.watch(model,log='gradients',log_freq=1)
+
     trainer = pl.Trainer(
         gpus=GPUS,
         progress_bar_refresh_rate=1,
         automatic_optimization=False,
         max_steps=1,
-        profiler="advanced",
+        # profiler="advanced",
+        logger= wandb_logger
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)
