@@ -7,6 +7,7 @@ import os
 import numpy as np
 import torch
 import dgl
+from time import time
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torch.nn import functional as functional
@@ -62,7 +63,7 @@ if __name__ == "__main__":
     train_idx = range(0, train_max_range)
     val_idx = range(train_max_range, len(dataset))
 
-    EPOCHS = 1
+    EPOCHS = 10
 
     torch.autograd.set_detect_anomaly(True)
 
@@ -71,7 +72,6 @@ if __name__ == "__main__":
         custom collate function; makes each sample's input have the same dimension as the longest one
         input consists of the dataset entries that were automatically selected to be in the next batch
         """
-
         the_batch_sample = dict()
 
         token_list = []
@@ -166,7 +166,9 @@ if __name__ == "__main__":
         logger=logger,
     )
 
+    start = time()
     trainer.fit(model, train_data_loader, val_data_loader)
+    print("Finished training with {} secs.".format(time() - start))
 
     # # for each epoch
     # for epoch in range(EPOCHS):
