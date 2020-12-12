@@ -182,6 +182,7 @@ if __name__ == "__main__":
         # gpus=GPUS,
         progress_bar_refresh_rate=20,
         automatic_optimization=False,
+        num_sanity_val_steps=0,
         # overfit_batches=1,
         # max_steps=50,
         max_epochs = 3,
