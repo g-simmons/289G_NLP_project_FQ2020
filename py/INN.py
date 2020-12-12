@@ -18,6 +18,7 @@ from config import (
     MAX_ENTITY_TOKENS,
     CELL_STATE_CLAMP_VAL,
     HIDDEN_STATE_CLAMP_VAL,
+    LEARNING_RATE
 )
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import pytorch_lightning as pl
@@ -169,7 +170,7 @@ class INNModel(pl.LightningModule):
                 predictions_row.append(torch.tensor([0.001, 0.999]).to(self.device))
             predictions.append(predictions_row)
         c = self.cell.init_cell_state()
-    
+
         # for each batch entry
         for batch_entry_num in range(curr_batch_size):
             # iterates over the current batch entry's S, T, and element_names
@@ -185,10 +186,7 @@ class INNModel(pl.LightningModule):
                     and element_name > -1
                 ):
                     args_idx = argset[argset > -1]
-                    try:
-                        stacked = torch.stack(predictions[batch_entry_num])
-                    except:
-                        print(predictions[batch_entry_num])
+                    stacked = torch.stack(predictions[batch_entry_num])
                     if torch.all(
                         stacked[args_idx, 1] > 0.5
                     ):
@@ -304,5 +302,5 @@ class INNModelLightning(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adadelta(self.parameters(), lr=1.0)
+        optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
         return optimizer
