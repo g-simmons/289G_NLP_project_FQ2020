@@ -175,7 +175,7 @@ if __name__ == "__main__":
 
     wandb_logger = WandbLogger(name='test',project='nested-relation-extraction',entity="ner")
     wandb_logger.watch(model,log='gradients',log_freq=1)
-    wandb_logger.log_hyperparams(wandb_config)
+    # wandb_logger.log_hyperparams(wandb_config)
 
     trainer = pl.Trainer(
         tpu_cores=8,
