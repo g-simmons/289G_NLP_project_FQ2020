@@ -22,8 +22,6 @@ from config import (
 )
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import pytorch_lightning as pl
-
-
 class INNModel(pl.LightningModule):
     """INN model configuration.
 
@@ -224,6 +222,7 @@ class INNModel(pl.LightningModule):
         # concatenates all predictions along the 0 dimension; basically a list of predictions
         # expected to have shape N x 2, where N is the number of predictions
         predictions = torch.cat(predictions, dim=0)
+        print(predictions)
         predictions.clamp_(min=1e-3)
 
         return predictions

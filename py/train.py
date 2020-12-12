@@ -40,8 +40,6 @@ from config import (
     EXCLUDE_SAMPLES,
 )
 
-BATCH_SIZE = 1
-
 from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
 from daglstmcell import DAGLSTMCell
@@ -146,9 +144,9 @@ if __name__ == "__main__":
 
     # iterators that automatically give you the next batched samples using the collate function
     train_data_loader = DataLoader(
-        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE
+        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE, num_workers=4
     )
-    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1)
+    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1, num_workers=4)
 
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
