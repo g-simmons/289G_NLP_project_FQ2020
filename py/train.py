@@ -40,6 +40,8 @@ from config import (
     EXCLUDE_SAMPLES,
 )
 
+BATCH_SIZE = 1
+
 from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
 from daglstmcell import DAGLSTMCell
@@ -183,6 +185,7 @@ if __name__ == "__main__":
 
     trainer = pl.Trainer(
         # tpu_cores=8,
+        precision=16,
         gpus=GPUS,
         progress_bar_refresh_rate=20,
         automatic_optimization=False,
