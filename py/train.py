@@ -173,8 +173,8 @@ if __name__ == "__main__":
         "exclude_samples":EXCLUDE_SAMPLES
     }
 
-    wandb_logger = WandbLogger(name='test',project='nested-relation-extraction',entity="ner")
-    wandb_logger.watch(model,log='gradients',log_freq=1)
+    wandb_logger = WandbLogger(name='test',project='nested-relation-extraction',entity="ner",config=wandb_config,log_model=True)
+    # wandb_logger.watch(model,log='gradients',log_freq=1)
     # wandb_logger.log_hyperparams(wandb_config)
 
     trainer = pl.Trainer(
