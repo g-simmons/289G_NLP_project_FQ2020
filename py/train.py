@@ -183,7 +183,7 @@ if __name__ == "__main__":
 
     trainer = pl.Trainer(
         # tpu_cores=8,
-        precision=16,
+        # precision=16,
         gpus=GPUS,
         progress_bar_refresh_rate=20,
         automatic_optimization=False,

@@ -222,7 +222,6 @@ class INNModel(pl.LightningModule):
         # concatenates all predictions along the 0 dimension; basically a list of predictions
         # expected to have shape N x 2, where N is the number of predictions
         predictions = torch.cat(predictions, dim=0)
-        print(predictions)
         predictions.clamp_(min=1e-3)
 
         return predictions

@@ -80,8 +80,8 @@ class DAGLSTMCell(pl.LightningModule):
 
         c = torch.mul(i, c_hat) + torch.sum(torch.stack(fj_mul_css))
 
-        if torch.any(c > self.cell_state_clamp_val):
-            c = c / torch.max(c) * self.cell_state_clamp_val
+        c = c / 1e2
+        c.clamp_(min=-self.cell_state_clamp_val,max=self.cell_state_clamp_val)
 
         h = torch.mul(torch.tanh(c), o)
 
