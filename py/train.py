@@ -6,7 +6,6 @@ import sys
 import os
 import numpy as np
 import torch
-import dgl
 from time import time
 from torch import nn
 from torch.utils.data import DataLoader, random_split
