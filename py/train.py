@@ -178,8 +178,8 @@ if __name__ == "__main__":
     # wandb_logger.log_hyperparams(wandb_config)
 
     trainer = pl.Trainer(
-        tpu_cores=8,
-        # gpus=GPUS,
+        # tpu_cores=8,
+        gpus=GPUS,
         progress_bar_refresh_rate=20,
         automatic_optimization=False,
         num_sanity_val_steps=0,
