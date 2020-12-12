@@ -174,7 +174,7 @@ if __name__ == "__main__":
     }
 
     wandb_logger = WandbLogger(name='test',project='nested-relation-extraction',entity="ner",config=wandb_config,log_model=True)
-    # wandb_logger.watch(model,log='gradients',log_freq=1)
+    wandb_logger.watch(model,log='gradients',log_freq=1)
     # wandb_logger.log_hyperparams(wandb_config)
 
     trainer = pl.Trainer(
@@ -182,7 +182,7 @@ if __name__ == "__main__":
         gpus=GPUS,
         progress_bar_refresh_rate=20,
         automatic_optimization=False,
-        num_sanity_val_steps=0,
+        num_sanity_val_steps=2,
         # overfit_batches=1,
         # max_steps=50,
         max_epochs = 3,

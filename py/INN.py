@@ -146,6 +146,7 @@ class INNModel(pl.LightningModule):
         self, tokens, entity_spans, element_names, T, S, entity_spans_size, tokens_size
     ):
         curr_batch_size = entity_spans.shape[1]
+        self.logger.experiment.log({"curr_batch_size": curr_batch_size})
 
         # gets the embedding for each token
         embedded_sentence = self.word_embeddings(tokens)
@@ -219,6 +220,8 @@ class INNModel(pl.LightningModule):
         # concatenates all predictions along the 0 dimension; basically a list of predictions
         # expected to have shape N x 2, where N is the number of predictions
         predictions = torch.cat(predictions, dim=0)
+        predicted_pos = torch.sum(predictions[:,1] > 0.5)
+        self.logger.experiment.log({'predicted_pos': predicted_pos})
 
         return predictions
 
