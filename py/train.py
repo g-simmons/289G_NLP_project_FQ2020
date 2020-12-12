@@ -37,7 +37,7 @@ from config import (
     XML_PATH,
     PREPPED_DATA_PATH,
     LEARNING_RATE,
-    EXCLUDE_SAMPLES
+    EXCLUDE_SAMPLES,
 )
 
 BATCH_SIZE = 1
@@ -167,14 +167,20 @@ if __name__ == "__main__":
         "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
         "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
         "vector_dim": VECTOR_DIM,
-        "word_embedding_dim" : WORD_EMBEDDING_DIM,
+        "word_embedding_dim": WORD_EMBEDDING_DIM,
         "hidden_dim": HIDDEN_STATE_CLAMP_VAL,
-        "relation_embedding_dim":RELATION_EMBEDDING_DIM,
-        "exclude_samples":EXCLUDE_SAMPLES
+        "relation_embedding_dim": RELATION_EMBEDDING_DIM,
+        "exclude_samples": EXCLUDE_SAMPLES,
     }
 
-    wandb_logger = WandbLogger(name='test',project='nested-relation-extraction',entity="ner",config=wandb_config,log_model=True)
-    wandb_logger.watch(model,log='gradients',log_freq=1)
+    wandb_logger = WandbLogger(
+        name="test",
+        project="nested-relation-extraction",
+        entity="ner",
+        config=wandb_config,
+        log_model=True,
+    )
+    wandb_logger.watch(model, log="gradients", log_freq=1)
     # wandb_logger.log_hyperparams(wandb_config)
 
     trainer = pl.Trainer(
@@ -185,10 +191,10 @@ if __name__ == "__main__":
         num_sanity_val_steps=2,
         # overfit_batches=1,
         # max_steps=50,
-        max_epochs = 3,
+        max_epochs=3,
         # profiler="advanced",
         val_check_interval=0.25,
-        logger= wandb_logger
+        logger=wandb_logger,
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)

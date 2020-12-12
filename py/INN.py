@@ -18,7 +18,7 @@ from config import (
     MAX_ENTITY_TOKENS,
     CELL_STATE_CLAMP_VAL,
     HIDDEN_STATE_CLAMP_VAL,
-    LEARNING_RATE
+    LEARNING_RATE,
 )
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import pytorch_lightning as pl
@@ -73,7 +73,6 @@ class INNModel(pl.LightningModule):
             nn.Linear(2 * self.hidden_dim, 4 * self.hidden_dim),
             nn.Linear(4 * self.hidden_dim, 2),
         )
-
 
     def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
         """Apply attention mechanism to entity representation.
@@ -147,7 +146,6 @@ class INNModel(pl.LightningModule):
     ):
         curr_batch_size = entity_spans.shape[1]
 
-
         # gets the embedding for each token
         embedded_sentence = self.word_embeddings(tokens)
         # to make computation faster, gets rid of padding by packing the batch tensor
@@ -157,7 +155,11 @@ class INNModel(pl.LightningModule):
         # unpacks the output tensor (re-adds the padding) so that other functions can use it
         blstm_out, _ = pad_packed_sequence(blstm_out)
         # gets the hidden vector for each entity and stores them in H
-        H = torch.randn(T.shape[0], curr_batch_size, 2 * HIDDEN_DIM).detach().to(self.device)
+        H = (
+            torch.randn(T.shape[0], curr_batch_size, 2 * HIDDEN_DIM)
+            .detach()
+            .to(self.device)
+        )
         H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
         predictions = []
@@ -188,13 +190,13 @@ class INNModel(pl.LightningModule):
                 ):
                     args_idx = argset[argset > -1]
                     stacked = torch.stack(predictions[batch_entry_num])
-                    if torch.all(
-                        stacked[args_idx, 1] > 0.5
-                    ):
+                    if torch.all(stacked[args_idx, 1] > 0.5):
                         hidden_vectors = H[args_idx, batch_entry_num]
                         cell_states = [c for _ in hidden_vectors]
                         e = self.element_embeddings(element_name)
-                        cell_states = torch.cat(cell_states).unsqueeze(1).to(self.device)
+                        cell_states = (
+                            torch.cat(cell_states).unsqueeze(1).to(self.device)
+                        )
                         h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
                         h_out = h_out.to(self.device)
                         c = c.to(self.device)
@@ -211,7 +213,9 @@ class INNModel(pl.LightningModule):
                         )
                         predictions[batch_entry_num][target_idx] = torch.tensor(
                             [0.999, 0.001]
-                        ).to(self.device)  # predict negative if all arguments have not been predicted positive
+                        ).to(
+                            self.device
+                        )  # predict negative if all arguments have not been predicted positive
             # concatenates the batch entry's predictions along the 0 dimension
             predictions[batch_entry_num] = torch.stack(
                 predictions[batch_entry_num], dim=0
@@ -270,7 +274,9 @@ class INNModelLightning(pl.LightningModule):
         return predictions
 
     def training_step(self, batch_sample, batch_idx):
-        self.logger.experiment.log({"curr_batch_size": batch_sample["entity_spans"].shape[1]})
+        self.logger.experiment.log(
+            {"curr_batch_size": batch_sample["entity_spans"].shape[1]}
+        )
         opt = self.optimizers()
         raw_predictions = self.inn(
             batch_sample["tokens"],
@@ -283,8 +289,8 @@ class INNModelLightning(pl.LightningModule):
         )
         predictions = torch.log(raw_predictions)
         loss = self.criterion(predictions, batch_sample["labels"])
-        predicted_pos = torch.sum(raw_predictions[:,1] > 0.5)
-        self.logger.experiment.log({'predicted_pos': predicted_pos})
+        predicted_pos = torch.sum(raw_predictions[:, 1] > 0.5)
+        self.logger.experiment.log({"predicted_pos": predicted_pos})
         if len(predictions) > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
             opt.step()
