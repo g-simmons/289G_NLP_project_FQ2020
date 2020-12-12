@@ -7,14 +7,17 @@ import os
 import numpy as np
 import torch
 import dgl
+from time import time
 from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torch.nn import functional as functional
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
 from torch.utils.tensorboard import SummaryWriter
 import pytorch_lightning as pl
+from pytorch_lightning.loggers import WandbLogger
 from tqdm import tqdm
 from pathlib import Path
+import wandb
 
 sys.path.append("../py")
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
@@ -34,7 +37,11 @@ from config import (
     HIDDEN_STATE_CLAMP_VAL,
     XML_PATH,
     PREPPED_DATA_PATH,
+    LEARNING_RATE,
+    EXCLUDE_SAMPLES
 )
+
+BATCH_SIZE = 1
 
 from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
@@ -61,7 +68,7 @@ if __name__ == "__main__":
     train_idx = range(0, train_max_range)
     val_idx = range(train_max_range, len(dataset))
 
-    EPOCHS = 1
+    EPOCHS = 10
 
     torch.autograd.set_detect_anomaly(True)
 
@@ -70,7 +77,6 @@ if __name__ == "__main__":
         custom collate function; makes each sample's input have the same dimension as the longest one
         input consists of the dataset entries that were automatically selected to be in the next batch
         """
-
         the_batch_sample = dict()
 
         token_list = []
@@ -155,82 +161,33 @@ if __name__ == "__main__":
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
     )
 
+    wandb_config = {
+        "batch_size": BATCH_SIZE,
+        "max_layers": MAX_LAYERS,
+        "learning_rate": LEARNING_RATE,
+        "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
+        "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
+        "vector_dim": VECTOR_DIM,
+        "word_embedding_dim" : WORD_EMBEDDING_DIM,
+        "hidden_dim": HIDDEN_STATE_CLAMP_VAL,
+        "relation_embedding_dim":RELATION_EMBEDDING_DIM,
+        "exclude_samples":EXCLUDE_SAMPLES
+    }
+
+    wandb_logger = WandbLogger(name='test',project='nested-relation-extraction',entity="ner")
+    wandb_logger.watch(model,log='gradients',log_freq=1)
+    wandb_logger.log_hyperparams(wandb_config)
+
     trainer = pl.Trainer(
         gpus=GPUS,
         progress_bar_refresh_rate=1,
         automatic_optimization=False,
-        max_steps=1,
-        profiler="advanced",
+        # overfit_batches=1,
+        # max_steps=50,
+        max_epochs = 3,
+        # profiler="advanced",
+        val_check_interval=0.25,
+        logger= wandb_logger
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)
-
-    # # for each epoch
-    # for epoch in range(EPOCHS):
-    #     print([f"EPOCH {epoch}"])
-
-    #     # iterate over the data loader; data loader gives next batched sample
-    #     for step, batch_sample in enumerate(train_data_loader):
-    #         n_iter = (epoch) * len(train_idx) + step
-    #         optimizer.zero_grad()
-
-    #         # does a forward pass with the model using the batched sample as input
-    #         raw_predictions = model(
-    #             batch_sample["tokens"],
-    #             batch_sample["entity_spans"],
-    #             batch_sample["element_names"],
-    #             batch_sample["H"],
-    #             batch_sample["T"],
-    #             batch_sample["S"],
-    #             batch_sample["entity_spans_pre-padded_size"],
-    #             batch_sample["tokens_pre-padded_size"],
-    #         )
-
-    #         predictions = torch.log(raw_predictions)
-    #         loss = criterion(predictions, batch_sample["labels"])
-    #         if loss.isnan().item():
-    #             print(raw_predictions)
-    #             raise ValueError("NaN loss encountered")
-
-    #         # keeps track of how many rows in the entity spans there are in total
-    #         entity_spans_total_num = sum(batch_sample["entity_spans_pre-padded_size"])
-
-    #         # if the model has made predictions on relations.
-    #         # This doesn't happen if there are no possible relations in the sentence given the schema
-    #         if len(predictions) > entity_spans_total_num:
-    #             loss.backward()
-    #             optimizer.step()
-    #             tb.add_scalar("loss", loss, n_iter)
-
-    #         for param in param_names:
-    #             param = re.sub(r"\.([0-9])", r"[\1]", param)
-    #             tb.add_histogram(param, eval(f"model.{param}"), n_iter)
-    #             tb.flush()
-
-    #     # validation phase; parameters will not be updated during this time
-    #     # currently uses a batch size of 1
-    #     with torch.no_grad():
-    #         val_accs = []
-
-    #         print([f"EPOCH {epoch} VALIDATION"])
-    #         for step, batch_sample in enumerate(val_data_loader):
-    #             labels = batch_sample["labels"]
-    #             predictions = torch.argmax(
-    #                 model(
-    #                     batch_sample["tokens"],
-    #                     batch_sample["entity_spans"],
-    #                     batch_sample["element_names"],
-    #                     batch_sample["H"],
-    #                     batch_sample["T"],
-    #                     batch_sample["S"],
-    #                     batch_sample["entity_spans_pre-padded_size"],
-    #                     batch_sample["tokens_pre-padded_size"],
-    #                 )
-    #             )
-    #             acc = sum(predictions == labels) / len(labels)
-    #             val_accs.append(acc.item())
-
-    #         val_acc = np.mean(val_accs)
-    #         tb.add_scalar("val_acc", val_acc, n_iter)
-    #         print("Epoch {:05d} | Val Acc {:.4f} |".format(epoch, val_acc))
-    #         tb.flush()

@@ -65,9 +65,7 @@ class DAGLSTMCell(pl.LightningModule):
 
     def forward(self, hjs, cjs, e):
         v = torch.flatten(hjs)
-
         ioc_hat = self.W_ioc_hat(e)
-
         ioc_hat += self.U_ioc_hat(v)
         ioc_hat += self.b_ioc_hat
         ioc_hat = torch.sigmoid(ioc_hat)
@@ -82,10 +80,9 @@ class DAGLSTMCell(pl.LightningModule):
 
         c = torch.mul(i, c_hat) + torch.sum(torch.stack(fj_mul_css))
 
-        c = torch.clamp(c, -self.cell_state_clamp_val, self.cell_state_clamp_val)
+        if torch.any(c > self.cell_state_clamp_val):
+            c = c / torch.max(c) * self.cell_state_clamp_val
 
         h = torch.mul(torch.tanh(c), o)
-
-        h = torch.clamp(h, -self.hidden_state_clamp_val, self.hidden_state_clamp_val)
 
         return h, c
