@@ -283,7 +283,7 @@ class INNModelLightning(pl.LightningModule):
         loss = self.criterion(predictions, batch_sample["labels"])
         if len(predictions) > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
-            self.manual_optimizer_step(opt)
+            opt.step()
             self.logger.experiment.log({"loss": loss})
 
     def validation_step(self, batch_sample, batch_idx):
