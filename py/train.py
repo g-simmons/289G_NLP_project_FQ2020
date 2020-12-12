@@ -180,7 +180,7 @@ if __name__ == "__main__":
     trainer = pl.Trainer(
         tpu_cores=8,
         # gpus=GPUS,
-        progress_bar_refresh_rate=1,
+        progress_bar_refresh_rate=20,
         automatic_optimization=False,
         # overfit_batches=1,
         # max_steps=50,
