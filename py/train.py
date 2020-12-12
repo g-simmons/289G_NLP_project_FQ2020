@@ -40,8 +40,6 @@ from config import (
     EXCLUDE_SAMPLES,
 )
 
-BATCH_SIZE = 1
-
 from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
 from daglstmcell import DAGLSTMCell
