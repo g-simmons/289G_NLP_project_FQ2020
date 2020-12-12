@@ -151,7 +151,7 @@ class INNModel(pl.LightningModule):
         embedded_sentence = self.word_embeddings(tokens)
         # to make computation faster, gets rid of padding by packing the batch tensor
         # only RNN can use packed tensors
-        embedded_sentence = pack_padded_sequence(embedded_sentence, tokens_size)
+        embedded_sentence = pack_padded_sequence(embedded_sentence, tokens_size.cpu())
         blstm_out, _ = self.blstm(embedded_sentence)
         # unpacks the output tensor (re-adds the padding) so that other functions can use it
         blstm_out, _ = pad_packed_sequence(blstm_out)
