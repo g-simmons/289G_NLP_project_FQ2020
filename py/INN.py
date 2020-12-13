@@ -139,53 +139,50 @@ class INNModel(pl.LightningModule):
                     to_predict.append(prediction_candidate)
         return to_predict
 
+    def _get_mask(self,layers,element_names,is_entity):
+        mask = torch.logical_and(L == layers, element_names > -1)
+        mask = torch.logical_and(mask, torch.logical_not(is_entity))
+
     def forward(
-        self, tokens, entity_spans, element_names, T, S, entity_spans_size, tokens_size
+        self, tokens, entity_spans, element_names, T, S, L, entity_spans_size, tokens_size
     ):
-        curr_batch_size = entity_spans.shape[1]
 
         # gets the embedding for each token
         embedded_sentence = self.word_embeddings(tokens)
-        # to make computation faster, gets rid of padding by packing the batch tensor
-        # only RNN can use packed tensors
+
+        # pack embeddings, feed to RNN, unpack
         embedded_sentence = pack_padded_sequence(embedded_sentence, tokens_size.cpu())
         blstm_out, _ = self.blstm(embedded_sentence)
-        # unpacks the output tensor (re-adds the padding) so that other functions can use it
         blstm_out, _ = pad_packed_sequence(blstm_out)
+
         # gets the hidden vector for each entity and stores them in H
         H = (
-            torch.randn(T.shape[0], curr_batch_size, 2 * HIDDEN_DIM)
+            torch.randn(T.shape[0], 2 * HIDDEN_DIM)
             .detach()
             .to(self.device)
         )
         H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
-        predictions = []
+        predictions = [torch.tensor([0.001, 0.999]) for _ in range(T.shape[0])]
 
-        # for each batch entry
-        for batch_entry_num in range(curr_batch_size):
-            predictions_row = []
-            # for each entity span for the current batch entry
-            for _ in range(entity_spans_size[batch_entry_num]):
-                # add a "prediction" that's basically certain it's right
-                predictions_row.append(torch.tensor([0.001, 0.999]).to(self.device))
-            predictions.append(predictions_row)
         c = self.cell.init_cell_state()
 
-        # for each batch entry
-        for batch_entry_num in range(curr_batch_size):
-            # iterates over the current batch entry's S, T, and element_names
-            # and generates the current batch entry's predictions
+        for layer in layers:
+            mask = self._get_mask(layers, element_names, is_entity)
+            hidden_vectors = H[mask]
+            cell_states = [c for _ in hidden_vectors]
+            element_embeddings = self.element_embeddings(element_names)
+            h_out, c = self.cell.forward(hidden_vectors, cell_states, element_embeddings)
+
+            parent_children = torch.split(child_h, child_counts)
+
+            args_idx = argset[argset > -1]
+
             for argset, target_idx, element_name in zip(
                 S[:, batch_entry_num],
                 T[:, batch_entry_num],
                 element_names[:, batch_entry_num],
             ):
-
-                if (
-                    target_idx >= entity_spans_size[batch_entry_num]
-                    and element_name > -1
-                ):
                     args_idx = argset[argset > -1]
                     stacked = torch.stack(predictions[batch_entry_num])
                     if torch.all(stacked[args_idx, 1] > 0.5):

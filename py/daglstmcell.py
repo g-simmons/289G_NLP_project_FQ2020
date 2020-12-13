@@ -38,50 +38,40 @@ class DAGLSTMCell(pl.LightningModule):
         self.cell_state_clamp_val = cell_state_clamp_val
 
         self.W_ioc_hat = nn.Linear(relation_embedding_dim, 3 * hidden_dim, bias=False)
-        self.W_fs = nn.ModuleList(
-            [
-                nn.Linear(relation_embedding_dim, hidden_dim, bias=False)
-                for j in range(max_inputs)
-            ]
-        )
+        self.W_fs = nn.Linear(relation_embedding_dim, hidden_dim, bias=False)
 
-        self.U_ioc_hat = nn.Linear(
-            max_inputs * hidden_dim, 3 * hidden_dim, bias=False
-        )  # can pad with zeros to have dynamic
-        self.U_fs = nn.ModuleList(
-            [
-                nn.Linear(max_inputs * hidden_dim, hidden_dim, bias=False)
-                for j in range(max_inputs)
-            ]
-        )
+        self.U_ioc_hat = nn.Linear(max_inputs * hidden_dim, 3 * hidden_dim, bias=False)
+        self.U_fs = nn.Linear(max_inputs * hidden_dim, hidden_dim, bias=False)
 
         self.b_ioc_hat = nn.Parameter(torch.zeros(3 * hidden_dim))
-        self.b_fs = nn.ParameterList(
-            [nn.Parameter(torch.zeros(hidden_dim)) for j in range(max_inputs)]
-        )
+        self.b_fs = nn.Parameter(torch.zeros(hidden_dim))
 
     def init_cell_state(self):
         return torch.zeros(1, self.hidden_dim).clone().detach().requires_grad_(True)
 
-    def forward(self, hjs, cjs, e):
-        v = torch.flatten(hjs)
-        ioc_hat = self.W_ioc_hat(e)
+    def forward(self, hidden_vectors, cell_states, element_embeddings, S):
+        v = torch.stack([torch.flatten(hidden_vectors[idx]) for idx in S])
+
+        ioc_hat = self.W_ioc_hat(element_embeddings)
         ioc_hat += self.U_ioc_hat(v)
         ioc_hat += self.b_ioc_hat
-        ioc_hat = torch.sigmoid(ioc_hat)
-        i, o, c_hat = torch.chunk(ioc_hat, 3)
+
+        i, o, c_hat = torch.chunk(ioc_hat, 3, dim=1)
         i, o, c_hat = torch.sigmoid(i), torch.sigmoid(o), torch.tanh(c_hat)
 
-        fj_mul_css = []
-        for j in range(len(hjs)):
-            fj = torch.sigmoid(self.W_fs[j](e) + self.U_fs[j](v) + self.b_fs[j])
-            fjcj = fj * cjs[j]
-            fj_mul_css.append(fjcj)
+        ebc = element_embeddings.repeat(1, self.max_inputs).reshape(-1,element_embeddings.shape[1])
+        fj = self.W_fs(ebc)
 
-        c = torch.mul(i, c_hat) + torch.sum(torch.stack(fj_mul_css))
+        vbc = v.repeat(1,self.max_inputs).reshape(-1,v.shape[1])
+        fj += self.U_fs(vbc)
+        fj += self.b_fs
 
-        c = c / 1e2
-        c.clamp_(min=-self.cell_state_clamp_val,max=self.cell_state_clamp_val)
+        fj = torch.sigmoid(fj)
+
+        fjcj = torch.mul(fj, cell_states)
+        fj_mul_css = torch.stack([torch.sum(fjcj[idx],dim=0) for idx in S])
+
+        c = torch.mul(i, c_hat) + fj_mul_css
 
         h = torch.mul(torch.tanh(c), o)
 
