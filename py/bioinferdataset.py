@@ -50,12 +50,12 @@ def sort_args(arguments):
 
 def process_sample(sample, inverse_schema):
     element_names = sample["element_names"].flatten().tolist()
-    j = len(element_names)
-    T_temp = torch.arange(j)
+    num_true_elements = len(element_names)
+    T_temp = torch.arange(num_true_elements)
 
     S_temp = [
         nn.functional.pad(e, pad=(0, 2 - len(e)), mode="constant", value=-1)
-        for e in list(T_temp.chunk(j))
+        for e in list(T_temp.chunk(num_true_elements))
     ]
 
     a = 1  # TODO: only handling single sentences for now
@@ -67,18 +67,16 @@ def process_sample(sample, inverse_schema):
     max_layers = MAX_LAYERS
 
     for layer in range(max_layers):
-        for arg_indices in torch.combinations(
-            torch.arange(0, j)
-        ):  # TODO single-argument relations?
-            layers_temp.append(layer + 1)
-            is_entity_temp.append(0)
+        for arg_indices in torch.combinations(T_temp):  # TODO single-argument relations?
             arguments = [element_names[idx] for idx in arg_indices.tolist()]
             key = sort_args(arguments)
             if key in inverse_schema.keys():
                 for predicate in inverse_schema[key].keys():
                     S_temp.append(arg_indices)
                     A_temp.append(a)
+                    is_entity_temp.append(0)
                     element_names.append(predicate)
+                    layers_temp.append(layer + 1)
                     L = 0  # default label is false
                     for i, graph in enumerate(sample["relation_graphs"]):
                         for n in graph.nodes():
@@ -95,14 +93,15 @@ def process_sample(sample, inverse_schema):
                                     child_indices.tolist() == arg_indices.tolist()
                                     and predicate == n_predicate
                                 ):  # check if children match and the predicate type is correct
-                                    sample["node_idx_to_element_idxs"][i][n.item()] = j
+                                    sample["node_idx_to_element_idxs"][i][n.item()] = num_true_elements
                                     L = 1  # this label is true because we found this candidate in the gold standard relation graphs
                     labels_temp.append(L)
-                    j += 1
+                    num_true_elements += 1
+                    T_temp = torch.arange(len(A_temp))
 
     sample["labels"] = torch.tensor(labels_temp, dtype=torch.long)
     sample["A"] = torch.tensor(A_temp)
-    sample["T"] = torch.arange(j)
+    sample["T"] = T_temp = torch.arange(len(A_temp))
     sample["S"] = torch.stack(S_temp)
     sample["element_names"] = torch.tensor(element_names)
     sample["L"] = torch.tensor(layers_temp)

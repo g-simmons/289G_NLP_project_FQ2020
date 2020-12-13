@@ -49,8 +49,12 @@ class DAGLSTMCell(pl.LightningModule):
     def init_cell_state(self):
         return torch.zeros(1, self.hidden_dim).clone().detach().requires_grad_(True)
 
-    def forward(self, hidden_vectors, cell_states, element_embeddings, S):
-        v = torch.stack([torch.flatten(hidden_vectors[idx]) for idx in S])
+    def forward(self, H, C, element_embeddings, S):
+        v = torch.stack([torch.flatten(H[idx]) for idx in S])
+        cell_states = torch.stack([torch.flatten(C[idx]) for idx in S])
+        print(v.shape)
+        print(element_embeddings.shape)
+        print(cell_states.shape)
 
         ioc_hat = self.W_ioc_hat(element_embeddings)
         ioc_hat += self.U_ioc_hat(v)
@@ -64,9 +68,13 @@ class DAGLSTMCell(pl.LightningModule):
         )
         fj = self.W_fs(ebc)
 
+
         vbc = v.repeat(1, self.max_inputs).reshape(-1, v.shape[1])
         fj += self.U_fs(vbc)
         fj += self.b_fs
+
+        print(fj.shape)
+        print(cell_states.shape)
 
         fj = torch.sigmoid(fj)
 

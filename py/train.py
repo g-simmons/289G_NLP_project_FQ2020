@@ -11,7 +11,6 @@ from torch import nn
 from torch.utils.data import DataLoader, random_split
 from torch.nn import functional as functional
 from torch.nn.utils.rnn import pad_sequence, pack_padded_sequence
-from torch.utils.tensorboard import SummaryWriter
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from tqdm import tqdm
@@ -48,8 +47,7 @@ from daglstmcell import DAGLSTMCell
 
 
 def collate_func(batch):
-
-    cat_keys = ["element_names","A","T","S","L","labels","is_entity"]
+    cat_keys = ["element_names","A","T","L","labels","is_entity","L"]
     list_keys = ["tokens","entity_spans"]
 
     if type(batch) == dict:
@@ -59,6 +57,14 @@ def collate_func(batch):
         new_batch[key] = torch.cat([sample[key] for sample in batch])
     for key in list_keys:
         new_batch[key] = [sample[key] for sample in batch]
+
+    S = batch[0]["S"]
+    for i in range(1,len(batch)):
+        s_new = batch[i]["S"]
+        s_new[s_new > -1] += batch[i-1]["T"].shape[0]
+        S = torch.cat(S, s_new)
+    new_batch["S"] = S
+
     return new_batch
 
 
@@ -115,14 +121,14 @@ if __name__ == "__main__":
         "exclude_samples": EXCLUDE_SAMPLES,
     }
 
-    # wandb_logger = WandbLogger(
-    #     name="test",
-    #     project="nested-relation-extraction",
-    #     entity="ner",
-    #     config=wandb_config,
-    #     log_model=True,
-    # )
-    # wandb_logger.watch(model, log="gradients", log_freq=1)
+    wandb_logger = WandbLogger(
+        name="test",
+        project="nested-relation-extraction",
+        entity="ner",
+        config=wandb_config,
+        log_model=True,
+    )
+    wandb_logger.watch(model, log="gradients", log_freq=1)
 
     trainer = pl.Trainer(
         gpus=GPUS,
@@ -131,7 +137,7 @@ if __name__ == "__main__":
         num_sanity_val_steps=2,
         max_epochs=3,
         val_check_interval=0.25,
-        # logger=wandb_logger,
+        logger=wandb_logger,
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)

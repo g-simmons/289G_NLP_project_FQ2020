@@ -10,7 +10,7 @@ LEARNING_RATE = 0.1
 CELL_STATE_CLAMP_VAL = 1e4
 HIDDEN_STATE_CLAMP_VAL = 1e6
 
-PREPPED_DATA_PATH = "../data/prepped_dataset_3.pickle"
+PREPPED_DATA_PATH = "../data/prepped_dataset_5.pickle"
 XML_PATH = "../data/BioInfer_corpus_1.1.1.xml"
 
 VECTOR_DIM = 256  # from page 6 of the paper
