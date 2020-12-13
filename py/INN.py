@@ -264,7 +264,6 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["tokens"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
-            batch_sample["H"],
             batch_sample["T"],
             batch_sample["S"],
             batch_sample["entity_spans_pre-padded_size"],

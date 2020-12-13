@@ -39,50 +39,54 @@ from config import (
     EXCLUDE_SAMPLES,
 )
 
+def get_child_indices(g, node_idx):
+    return torch.stack(g.out_edges(node_idx))[1].tolist()
+
+def sort_args(arguments):
+    return tuple(sorted(arguments))
 
 def process_sample(sample, inverse_schema):
-    element_names = sample["element_names"].numpy()
+    element_names = sample["element_names"].flatten().tolist()
     j = len(element_names)
-    element_indices = torch.arange(j)
+    T_temp = torch.arange(j)
 
     S_temp = [
         nn.functional.pad(e, pad=(0, 2 - len(e)), mode="constant", value=-1)
-        for e in list(element_indices.chunk(j))
+        for e in list(T_temp.chunk(j))
     ]
-    T_temp = element_indices.tolist()
 
     a = 1  # TODO: only handling single sentences for now
-    A_temp = [a for _ in element_indices]
-    labels_temp = [1 for _ in element_indices]
+    A_temp = [a for _ in T_temp]
+    labels_temp = [1 for _ in T_temp]
+    layers_temp = [0 for _ in T_temp]
 
     max_layers = MAX_LAYERS
 
-    for _ in range(max_layers):
-        ttt = torch.tensor(T_temp)
-        for c in torch.combinations(ttt):  # TODO single-argument relations?
-            e_names = torch.tensor(element_names)[c]
-            key = tuple(sorted(e.item() for e in e_names))
+    for layer in range(max_layers):
+        for arg_indices in torch.combinations(torch.arange(0,j)):  # TODO single-argument relations?
+            layers_temp.append(layer+1)
+            arguments = [element_names[idx] for idx in arg_indices.tolist()]
+            key = sort_args(arguments)
             if key in inverse_schema.keys():
                 for predicate in inverse_schema[key].keys():
-                    S_temp.append(c)
-                    T_temp.append(j)
+                    S_temp.append(arg_indices)
                     A_temp.append(a)
-                    element_names = np.append(element_names, predicate)
+                    element_names.append(predicate)
                     L = 0  # default label is false
-                    for i, g in enumerate(sample["relation_graphs"]):
-                        for n in g.nodes():
-                            child_idx = get_child_indices(g, node_idx=n)
-                            child_idx = torch.tensor(
+                    for i, graph in enumerate(sample["relation_graphs"]):
+                        for n in graph.nodes():
+                            n_predicate = graph.ndata["element_names"][n]
+                            child_indices = torch.tensor(
                                 [
                                     sample["node_idx_to_element_idxs"][i][idx]
-                                    for idx in child_idx
+                                    for idx in get_child_indices(graph, node_idx=n)
                                 ]
                             )
-                            if child_idx.shape == c.shape:
+                            if child_indices.shape == arg_indices.shape:
                                 # TODO ordering
                                 if (
-                                    child_idx.tolist() == c.tolist()
-                                    and element_names[j] == g.ndata["element_names"][n]
+                                    child_indices.tolist() == arg_indices.tolist()
+                                    and predicate == n_predicate
                                 ):  # check if children match and the predicate type is correct
                                     sample["node_idx_to_element_idxs"][i][n.item()] = j
                                     L = 1  # this label is true because we found this candidate in the gold standard relation graphs
@@ -91,9 +95,10 @@ def process_sample(sample, inverse_schema):
 
     sample["labels"] = torch.tensor(labels_temp, dtype=torch.long)
     sample["A"] = torch.tensor(A_temp)
-    sample["T"] = torch.tensor(T_temp)
+    sample["T"] = torch.arange(j)
     sample["S"] = torch.stack(S_temp)
     sample["element_names"] = torch.tensor(element_names)
+    sample["L"] = torch.tensor(layers_temp)
 
     # only need tokens, entity_spans, element_names, A, T, S, labels
     del sample["relation_graphs"]
@@ -102,10 +107,6 @@ def process_sample(sample, inverse_schema):
     del sample["element_locs"]
 
     return sample
-
-
-def get_child_indices(g, node_idx):
-    return torch.stack(g.out_edges(node_idx))[1].tolist()
 
 
 class BioInferDataset(Dataset):
@@ -140,25 +141,29 @@ class BioInferDataset(Dataset):
     def samples_to_pickle(self, pickle_file=PREPPED_DATA_PATH):
         pickle.dump(self.sample_list, open(pickle_file, "wb"))
 
-    def prep_data(self):
-        """
-        prepares the each data sample using process_sample()
-        stores the result in sample_list
-        """
-        print("prepping data...")
-        sample_list = tqdm.tqdm(
+    def pre_prep_data(self):
+        print("pre-prepping data...")
+        self.sample_list = tqdm.tqdm(
             [
                 self.process_sentence(sent, self.inverse_schema)
                 for i, sent in enumerate(self.parser.bioinfer.sentences.sentences)
                 if i not in EXCLUDE_SAMPLES
             ]
         )
+
+    def prep_data(self):
+        """
+        prepares the each data sample using process_sample()
+        stores the result in sample_list
+        """
+        if not len(self.sample_list):
+            self.pre_prep_data()
         print("processing data...")
         with Pool() as p:
             self.sample_list = list(
                 tqdm.tqdm(
                     p.istarmap(
-                        process_sample, product(sample_list, [self.inverse_schema])
+                        process_sample, product(self.sample_list, [self.inverse_schema])
                     )
                 )
             )

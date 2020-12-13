@@ -44,6 +44,81 @@ from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
 from daglstmcell import DAGLSTMCell
 
+def collate_func(data):
+    """
+    custom collate function; makes each sample's input have the same dimension as the longest one
+    input consists of the dataset entries that were automatically selected to be in the next batch
+    """
+    the_batch_sample = dict()
+
+    token_list = []
+    entity_spans_list = []
+    element_names_list = []
+    t_list = []
+    s_list = []
+    l_list = []
+    labels_list = []
+
+    # for each dataset entry selected to be in the batch
+    for index in range(len(data)):
+        # extract the entry's sample
+        curr_sample = data[index]
+
+        # put the sample's contents into its appropriate list
+        token_list.append(curr_sample["tokens"])
+        entity_spans_list.append(curr_sample["entity_spans"].long())
+        element_names_list.append(torch.flatten(curr_sample["element_names"]))
+        t_list.append(curr_sample["T"])
+        s_list.append(curr_sample["S"])
+        l_list.append(curr_sample["L"])
+        labels_list.append(curr_sample["labels"])
+
+    # pads each sample content accordingly
+    # format is L, B, D where L is the longest length, B is the batch size, D is the dimension size
+    # sorts entries in token list in descending order
+    token_len_list = torch.LongTensor([len(entry) for entry in token_list])
+    token_len_list, argsort_list = token_len_list.sort(dim=0, descending=True)
+    token_list = [token_list[index] for index in argsort_list]
+
+    # sorts other inputs accordingly to how the token list was sorted
+    entity_spans_list = [entity_spans_list[index] for index in argsort_list]
+    element_names_list = [element_names_list[index] for index in argsort_list]
+    t_list = [t_list[index] for index in argsort_list]
+    s_list = [s_list[index] for index in argsort_list]
+    l_list = [l_list[index] for index in argsort_list]
+    labels_list = [labels_list[index] for index in argsort_list]
+
+    the_batch_sample["tokens_pre-padded_size"] = token_len_list
+    the_batch_sample["labels"] = torch.cat(labels_list, dim=0)
+    the_batch_sample["entity_spans_pre-padded_size"] = [
+        len(entry) for entry in entity_spans_list
+    ]
+
+    # if the batch size is 1, then we need to add a dimension of size 1 to represent the batch size
+    if len(data) == 1:
+        the_batch_sample["tokens"] = token_list[0].unsqueeze(1)
+        the_batch_sample["entity_spans"] = entity_spans_list[0].unsqueeze(1)
+        the_batch_sample["element_names"] = element_names_list[0].unsqueeze(1)
+        the_batch_sample["T"] = t_list[0].unsqueeze(1)
+        the_batch_sample["S"] = s_list[0].unsqueeze(1)
+        the_batch_sample["L"] = s_list[0].unsqueeze(1)
+
+    # if the batch is > 1, then we need to pad the input so that they all have the same dimensions
+    else:
+        the_batch_sample["tokens"] = pad_sequence(
+            token_list, padding_value=dataset.vocab_dict["UNK"]
+        )
+        the_batch_sample["entity_spans"] = pad_sequence(
+            entity_spans_list, padding_value=-1
+        )
+        the_batch_sample["element_names"] = pad_sequence(
+            element_names_list, padding_value=-1
+        )
+        the_batch_sample["T"] = pad_sequence(t_list, padding_value=-1)
+        the_batch_sample["S"] = pad_sequence(s_list, padding_value=-1)
+        the_batch_sample["L"] = pad_sequence(l_list, padding_value=-1)
+    return the_batch_sample
+
 if __name__ == "__main__":
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
@@ -68,77 +143,6 @@ if __name__ == "__main__":
     EPOCHS = 10
 
     torch.autograd.set_detect_anomaly(True)
-
-    def collate_func(data):
-        """
-        custom collate function; makes each sample's input have the same dimension as the longest one
-        input consists of the dataset entries that were automatically selected to be in the next batch
-        """
-        the_batch_sample = dict()
-
-        token_list = []
-        entity_spans_list = []
-        element_names_list = []
-        t_list = []
-        s_list = []
-        labels_list = []
-
-        # for each dataset entry selected to be in the batch
-        for index in range(len(data)):
-            # extract the entry's sample
-            curr_sample = data[index]
-
-            # put the sample's contents into its appropriate list
-            token_list.append(curr_sample["tokens"])
-            entity_spans_list.append(curr_sample["entity_spans"].long())
-            element_names_list.append(torch.flatten(curr_sample["element_names"]))
-            t_list.append(curr_sample["T"])
-            s_list.append(curr_sample["S"])
-            labels_list.append(curr_sample["labels"])
-
-        # pads each sample content accordingly
-        # format is L, B, D where L is the longest length, B is the batch size, D is the dimension size
-        # sorts entries in token list in descending order
-        token_len_list = torch.LongTensor([len(entry) for entry in token_list])
-        token_len_list, argsort_list = token_len_list.sort(dim=0, descending=True)
-        token_list = [token_list[index] for index in argsort_list]
-
-        # sorts other inputs accordingly to how the token list was sorted
-        entity_spans_list = [entity_spans_list[index] for index in argsort_list]
-        element_names_list = [element_names_list[index] for index in argsort_list]
-        t_list = [t_list[index] for index in argsort_list]
-        s_list = [s_list[index] for index in argsort_list]
-        labels_list = [labels_list[index] for index in argsort_list]
-
-        the_batch_sample["tokens_pre-padded_size"] = token_len_list
-        the_batch_sample["labels"] = torch.cat(labels_list, dim=0)
-        the_batch_sample["entity_spans_pre-padded_size"] = [
-            len(entry) for entry in entity_spans_list
-        ]
-
-        # if the batch size is 1, then we need to add a dimension of size 1 to represent the batch size
-        if len(data) == 1:
-            the_batch_sample["tokens"] = token_list[0].unsqueeze(1)
-            the_batch_sample["entity_spans"] = entity_spans_list[0].unsqueeze(1)
-            the_batch_sample["element_names"] = element_names_list[0].unsqueeze(1)
-            the_batch_sample["T"] = t_list[0].unsqueeze(1)
-            the_batch_sample["S"] = s_list[0].unsqueeze(1)
-
-        # if the batch is > 1, then we need to pad the input so that they all have the same dimensions
-        else:
-            the_batch_sample["tokens"] = pad_sequence(
-                token_list, padding_value=dataset.vocab_dict["UNK"]
-            )
-            the_batch_sample["entity_spans"] = pad_sequence(
-                entity_spans_list, padding_value=-1
-            )
-            the_batch_sample["element_names"] = pad_sequence(
-                element_names_list, padding_value=-1
-            )
-            the_batch_sample["T"] = pad_sequence(t_list, padding_value=0)
-            the_batch_sample["S"] = pad_sequence(s_list, padding_value=0)
-        return the_batch_sample
-
     # splits the dataset into a training set and test set
     train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
 
