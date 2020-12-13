@@ -39,11 +39,14 @@ from config import (
     EXCLUDE_SAMPLES,
 )
 
+
 def get_child_indices(g, node_idx):
     return torch.stack(g.out_edges(node_idx))[1].tolist()
 
+
 def sort_args(arguments):
     return tuple(sorted(arguments))
+
 
 def process_sample(sample, inverse_schema):
     element_names = sample["element_names"].flatten().tolist()
@@ -59,12 +62,16 @@ def process_sample(sample, inverse_schema):
     A_temp = [a for _ in T_temp]
     labels_temp = [1 for _ in T_temp]
     layers_temp = [0 for _ in T_temp]
+    is_entity_temp = [1 for _ in T_temp]
 
     max_layers = MAX_LAYERS
 
     for layer in range(max_layers):
-        for arg_indices in torch.combinations(torch.arange(0,j)):  # TODO single-argument relations?
-            layers_temp.append(layer+1)
+        for arg_indices in torch.combinations(
+            torch.arange(0, j)
+        ):  # TODO single-argument relations?
+            layers_temp.append(layer + 1)
+            is_entity_temp.append(0)
             arguments = [element_names[idx] for idx in arg_indices.tolist()]
             key = sort_args(arguments)
             if key in inverse_schema.keys():
@@ -99,6 +106,7 @@ def process_sample(sample, inverse_schema):
     sample["S"] = torch.stack(S_temp)
     sample["element_names"] = torch.tensor(element_names)
     sample["L"] = torch.tensor(layers_temp)
+    sample["is_entity"] = torch.tensor(is_entity_temp)
 
     # only need tokens, entity_spans, element_names, A, T, S, labels
     del sample["relation_graphs"]
@@ -146,7 +154,7 @@ class BioInferDataset(Dataset):
         self.sample_list = tqdm.tqdm(
             [
                 self.process_sentence(sent, self.inverse_schema)
-                for i, sent in enumerate(self.parser.bioinfer.sentences.sentences)
+                for i, sent in enumerate(self.parser.bioinfer.sentences.sentences[0:32])
                 if i not in EXCLUDE_SAMPLES
             ]
         )

@@ -40,14 +40,27 @@ from config import (
     EXCLUDE_SAMPLES,
 )
 
+BATCH_SIZE = 2
+
 from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
 from daglstmcell import DAGLSTMCell
 
+
 def collate_func(batch):
-    for key in batch.keys():
-        batch[key] = torch.cat(sample[key] for sample in batch)
-    return batch
+
+    cat_keys = ["element_names","A","T","S","L","labels","is_entity"]
+    list_keys = ["tokens","entity_spans"]
+
+    if type(batch) == dict:
+        batch = [batch]
+    new_batch = {}
+    for key in cat_keys:
+        new_batch[key] = torch.cat([sample[key] for sample in batch])
+    for key in list_keys:
+        new_batch[key] = [sample[key] for sample in batch]
+    return new_batch
+
 
 if __name__ == "__main__":
     if torch.cuda.is_available():
@@ -75,9 +88,9 @@ if __name__ == "__main__":
     train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
 
     train_data_loader = DataLoader(
-        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE, num_workers=4
+        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE
     )
-    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1, num_workers=4)
+    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1)
 
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
@@ -102,14 +115,14 @@ if __name__ == "__main__":
         "exclude_samples": EXCLUDE_SAMPLES,
     }
 
-    wandb_logger = WandbLogger(
-        name="test",
-        project="nested-relation-extraction",
-        entity="ner",
-        config=wandb_config,
-        log_model=True,
-    )
-    wandb_logger.watch(model, log="gradients", log_freq=1)
+    # wandb_logger = WandbLogger(
+    #     name="test",
+    #     project="nested-relation-extraction",
+    #     entity="ner",
+    #     config=wandb_config,
+    #     log_model=True,
+    # )
+    # wandb_logger.watch(model, log="gradients", log_freq=1)
 
     trainer = pl.Trainer(
         gpus=GPUS,
@@ -118,7 +131,7 @@ if __name__ == "__main__":
         num_sanity_val_steps=2,
         max_epochs=3,
         val_check_interval=0.25,
-        logger=wandb_logger,
+        # logger=wandb_logger,
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)

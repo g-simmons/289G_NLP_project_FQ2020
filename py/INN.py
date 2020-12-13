@@ -22,6 +22,8 @@ from config import (
 )
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 import pytorch_lightning as pl
+
+
 class INNModel(pl.LightningModule):
     """INN model configuration.
 
@@ -103,7 +105,7 @@ class INNModel(pl.LightningModule):
                 # multiplies the current batch entry's attention weights and current batch's blstm_out
                 # creates a T x D matrix where T is the number of tokens and D is blstm_out's dimension
                 h_entity = torch.matmul(
-                    curr_batch_attn_weights, blstm_out[i, batch_entry_num].unsqueeze(0)
+                    curr_batch_attn_weights, blstm_out[i].unsqueeze(0)
                 )
 
                 # creates a vector of length D (512) and stores it in H_new
@@ -139,86 +141,66 @@ class INNModel(pl.LightningModule):
                     to_predict.append(prediction_candidate)
         return to_predict
 
-    def _get_mask(self,layers,element_names,is_entity):
+    def _get_mask(self, layers, element_names, is_entity):
         mask = torch.logical_and(L == layers, element_names > -1)
         mask = torch.logical_and(mask, torch.logical_not(is_entity))
 
     def forward(
-        self, tokens, entity_spans, element_names, T, S, L, entity_spans_size, tokens_size
+        self,
+        tokens,
+        entity_spans,
+        element_names,
+        A,
+        T,
+        S,
+        L,
+        is_entity,
     ):
+        splits = [len(toks) for toks in tokens]
+        embedded_tokens = torch.split(self.word_embeddings(torch.cat(tokens)),splits)
 
-        # gets the embedding for each token
-        embedded_sentence = self.word_embeddings(tokens)
-
-        # pack embeddings, feed to RNN, unpack
-        embedded_sentence = pack_padded_sequence(embedded_sentence, tokens_size.cpu())
-        blstm_out, _ = self.blstm(embedded_sentence)
-        blstm_out, _ = pad_packed_sequence(blstm_out)
+        blstm_outs = []
+        for batch_idx in range(torch.max(A)):
+            mask = A == batch_idx
+            # pack embeddings, feed to RNN, unpack
+            # embedded_sentence = pack_padded_sequence(
+            #     embedded_tokens[mask], tokens_size.cpu()[mask]
+            # )
+            embedded_sentence  = embedded_tokens[mask,:]
+            blstm_out, _ = self.blstm(embedded_sentence)
+            # blstm_out, _ = pad_packed_sequence(blstm_out)
+            blstm_outs.append(blstm_out)
+        blstm_out = torch.cat(blstm_outs)
 
         # gets the hidden vector for each entity and stores them in H
-        H = (
-            torch.randn(T.shape[0], 2 * HIDDEN_DIM)
+        C = (
+            torch.zeros(T.shape[0], 2 * HIDDEN_DIM)
+            .clone()
             .detach()
-            .to(self.device)
+            .requires_grad_(True)
         )
+        H = torch.randn(T.shape[0], 2 * HIDDEN_DIM).detach().to(self.device)
         H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
-        predictions = [torch.tensor([0.001, 0.999]) for _ in range(T.shape[0])]
-
-        c = self.cell.init_cell_state()
+        predictions = [
+            torch.tensor([0.999, 0.001]) for _ in range(T.shape[0])
+        ]  # default false
+        predictions[is_entity] = [
+            torch.tensor([0.001, 0.999]) for _ in range(sum(is_entity))
+        ]
 
         for layer in layers:
             mask = self._get_mask(layers, element_names, is_entity)
-            hidden_vectors = H[mask]
-            cell_states = [c for _ in hidden_vectors]
+            hidden_vectors = H[mask, :]
+            cell_states = C[mask, :]
             element_embeddings = self.element_embeddings(element_names)
-            h_out, c = self.cell.forward(hidden_vectors, cell_states, element_embeddings)
-
-            parent_children = torch.split(child_h, child_counts)
-
-            args_idx = argset[argset > -1]
-
-            for argset, target_idx, element_name in zip(
-                S[:, batch_entry_num],
-                T[:, batch_entry_num],
-                element_names[:, batch_entry_num],
-            ):
-                    args_idx = argset[argset > -1]
-                    stacked = torch.stack(predictions[batch_entry_num])
-                    if torch.all(stacked[args_idx, 1] > 0.5):
-                        hidden_vectors = H[args_idx, batch_entry_num]
-                        cell_states = [c for _ in hidden_vectors]
-                        e = self.element_embeddings(element_name)
-                        cell_states = (
-                            torch.cat(cell_states).unsqueeze(1).to(self.device)
-                        )
-                        h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
-                        h_out = h_out.to(self.device)
-                        c = c.to(self.device)
-                        H[target_idx, batch_entry_num] = h_out
-
-                        logits = self.output_linear(h_out)
-                        sm_logits = functional.softmax(logits, dim=0)
-
-                        predictions[batch_entry_num].append(sm_logits)
-
-                    else:
-                        predictions[batch_entry_num].append(
-                            torch.tensor([0.999, 0.001]).to(self.device)
-                        )
-                        predictions[batch_entry_num][target_idx] = torch.tensor(
-                            [0.999, 0.001]
-                        ).to(
-                            self.device
-                        )  # predict negative if all arguments have not been predicted positive
-            # concatenates the batch entry's predictions along the 0 dimension
-            predictions[batch_entry_num] = torch.stack(
-                predictions[batch_entry_num], dim=0
+            h_out, c = self.cell.forward(
+                hidden_vectors, cell_states, element_embeddings
             )
+            logits = self.output_linear(h_out)
+            sm_logits = functional.softmax(logits, dim=0)
+            predictions[mask] = sm_logits
 
-        # concatenates all predictions along the 0 dimension; basically a list of predictions
-        # expected to have shape N x 2, where N is the number of predictions
-        predictions = torch.cat(predictions, dim=0)
         predictions.clamp_(min=1e-3)
 
         return predictions
@@ -261,10 +243,11 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["tokens"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
+            batch_sample["A"],
             batch_sample["T"],
             batch_sample["S"],
-            batch_sample["entity_spans_pre-padded_size"],
-            batch_sample["tokens_pre-padded_size"],
+            batch_sample["L"],
+            batch_sample["is_entity"]
         )
         return predictions
 
@@ -277,10 +260,11 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["tokens"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
+            batch_sample["A"],
             batch_sample["T"],
             batch_sample["S"],
-            batch_sample["entity_spans_pre-padded_size"],
-            batch_sample["tokens_pre-padded_size"],
+            batch_sample["L"],
+            batch_sample["is_entity"]
         )
         predictions = torch.log(raw_predictions)
         loss = self.criterion(predictions, batch_sample["labels"])
@@ -296,10 +280,11 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["tokens"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
+            batch_sample["A"],
             batch_sample["T"],
             batch_sample["S"],
-            batch_sample["entity_spans_pre-padded_size"],
-            batch_sample["tokens_pre-padded_size"],
+            batch_sample["L"],
+            batch_sample["is_entity"]
         )
         predictions = torch.log(raw_predictions).to(self.device)
         loss = self.criterion(predictions, batch_sample["labels"])
