@@ -103,6 +103,7 @@ class INNModel(pl.LightningModule):
         L,
         is_entity,
     ):
+        # print(L.tolist())
         wemb = self.word_embeddings(torch.cat(tokens))
         token_splits = [len(t) for t in tokens]
         embedded_tokens = torch.split(wemb, token_splits)
@@ -112,23 +113,25 @@ class INNModel(pl.LightningModule):
         ]
 
         # gets the hidden vector for each entity and stores them in H
-        H = torch.randn(T.shape[0], self.word_embedding_dim * 2).detach().to(self.device)
+        H = torch.randn(T.shape[0], self.word_embedding_dim * 2).to(self.device)
+        # .detach()
         H = self.get_h_entities(
             entity_spans, blstm_out, token_splits, H, curr_batch_size, is_entity
         )
-        H.requires_grad_()
-        C = torch.zeros(T.shape[0], self.word_embedding_dim * 2).clone().detach().to(self.device)
-        C.requires_grad_()
+        # H.requires_grad_()
+
+        C = torch.zeros(T.shape[0], self.word_embedding_dim * 2).to(self.device)
+        # .detach().to(self.device)
 
         predictions = [
             PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
         ]
         predictions = torch.stack(predictions).to(self.device)
-        predictions.requires_grad_()
+        # predictions.requires_grad_()
 
         for layer in torch.unique(L):
             if layer > 0:
-                predictions = predictions.clone()
+                # predictions = predictions.clone()
                 parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
                 # args_predicted = torch.all(torch.ge(predictions[S][:,:,1], 0.5),dim=1)
                 # parent_mask = torch.logical_and(parent_mask,args_predicted)
@@ -140,13 +143,11 @@ class INNModel(pl.LightningModule):
                 cell_states = cell_states.flatten(start_dim=1)
                 h, c = self.cell.forward(v, cell_states, element_embeddings, s)
                 H[parent_mask, :] = h
-                C = C.clone()
                 C[parent_mask, :] = c
                 logits = self.output_linear(H[parent_mask, :])
                 sm_logits = functional.softmax(logits, dim=0)
                 predictions[parent_mask, :] = sm_logits
 
-        predictions = predictions.clone().clamp_(min=1e-3)
         return predictions
 
 
@@ -192,7 +193,7 @@ class INNModelLightning(pl.LightningModule):
         loss = self.criterion(predictions, batch_sample["labels"])
         predicted_pos = torch.sum(raw_predictions[:, 1] > 0.5)
         self.logger.experiment.log({"predicted_pos": predicted_pos})
-        if len(predictions) > len(batch_sample["entity_spans"]):
+        if predicted_pos > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
             opt.step()
             self.logger.experiment.log({"loss": loss})
@@ -212,7 +213,7 @@ class INNModelLightning(pl.LightningModule):
         raw_predictions = self.inn(*self.expand_batch(batch_sample))
         predictions = torch.log(raw_predictions).to(self.device)
         loss = self.criterion(predictions, batch_sample["labels"])
-        self.logger.experiment.log({"val_loss": loss})
+        # self.logger.experiment.log({"val_loss": loss})
         return loss
 
     def configure_optimizers(self):

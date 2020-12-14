@@ -74,15 +74,12 @@ class DAGLSTMCell(pl.LightningModule):
         i, o, c_hat = torch.chunk(ioc_hat, 3, dim=1)
         i, o, c_hat = torch.sigmoid(i), torch.sigmoid(o), torch.tanh(c_hat)
 
-        fj = torch.sigmoid(self.W_fs(element_embeddings) + self.U_fs(v) + self.b_fs)
+        f = torch.sigmoid(self.W_fs(element_embeddings) + self.U_fs(v) + self.b_fs)
 
-        fj = fj.reshape(-1, fj.shape[1] // 2)
+        cell_states = cell_states
+        fcj = torch.mul(f, cell_states)
 
-        cell_states = cell_states.reshape(-1, cell_states.shape[1] // 2)
-        fjcj = torch.mul(fj, cell_states)
-        fj_mul_css = torch.stack(
-            [torch.sum(fjcj_split, dim=0) for fjcj_split in fjcj.split(2)]
-        )
+        fj_mul_css = torch.sum(torch.stack([fcj_x for fcj_x in torch.split(fcj, self.hidden_dim, dim=1)]),dim=0)
 
         c = torch.mul(i, c_hat) + fj_mul_css
 
