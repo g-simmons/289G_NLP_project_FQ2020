@@ -76,7 +76,6 @@ class INNModel(pl.LightningModule):
 
         h_entities = []
         for sample in range(curr_batch_size):
-            print(entity_indices[sample])
             sample_entity_indices = [idx[idx >= 0] for idx in entity_indices[sample]]
             for idx in sample_entity_indices:
                 sample_attn_scores = attn_scores[sample][idx]
@@ -136,16 +135,17 @@ class INNModel(pl.LightningModule):
             if layer > 0:
                 predictions = predictions.clone()
                 parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
-                args_predicted = torch.all(torch.ge(predictions[S][:,:,1], 0.5),dim=1)
-                parent_mask = torch.logical_and(parent_mask,args_predicted)
+                # args_predicted = torch.all(torch.ge(predictions[S][:,:,1], 0.5),dim=1)
+                # parent_mask = torch.logical_and(parent_mask,args_predicted)
                 element_embeddings = self.element_embeddings(element_names[parent_mask])
                 s = S[parent_mask, :]
-                v = H[S]
+                v = H[s]
                 v = v.flatten(start_dim=1)
-                cell_states = C[S]
+                cell_states = C[s]
                 cell_states = cell_states.flatten(start_dim=1)
-                h, c = self.cell.forward(v, c, element_embeddings, s)
+                h, c = self.cell.forward(v, cell_states, element_embeddings, s)
                 H[parent_mask, :] = h
+                C = C.clone()
                 C[parent_mask, :] = c
                 logits = self.output_linear(H[parent_mask, :])
                 sm_logits = functional.softmax(logits, dim=0)
