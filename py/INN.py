@@ -103,7 +103,6 @@ class INNModel(pl.LightningModule):
         L,
         is_entity,
     ):
-        # print(L.tolist())
         wemb = self.word_embeddings(torch.cat(tokens))
         token_splits = [len(t) for t in tokens]
         embedded_tokens = torch.split(wemb, token_splits)
@@ -127,11 +126,11 @@ class INNModel(pl.LightningModule):
             PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
         ]
         predictions = torch.stack(predictions).to(self.device)
-        # predictions.requires_grad_()
+        predictions.requires_grad_()
 
         for layer in torch.unique(L):
             if layer > 0:
-                # predictions = predictions.clone()
+                predictions = predictions.clone()
                 parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
                 # args_predicted = torch.all(torch.ge(predictions[S][:,:,1], 0.5),dim=1)
                 # parent_mask = torch.logical_and(parent_mask,args_predicted)
@@ -145,7 +144,7 @@ class INNModel(pl.LightningModule):
                 H[parent_mask, :] = h
                 C[parent_mask, :] = c
                 logits = self.output_linear(H[parent_mask, :])
-                sm_logits = functional.softmax(logits, dim=0)
+                sm_logits = functional.softmax(logits, dim=1)
                 predictions[parent_mask, :] = sm_logits
 
         return predictions
@@ -177,6 +176,7 @@ class INNModelLightning(pl.LightningModule):
             hidden_state_clamp_val=hidden_state_clamp_val,
         )
         self.criterion = nn.NLLLoss()
+        self.accuracy = pl.metrics.Accuracy()
         self.param_names = [p[0] for p in self.inn.named_parameters()]
 
     def forward(self, batch_sample):
@@ -189,6 +189,7 @@ class INNModelLightning(pl.LightningModule):
         )
         opt = self.optimizers()
         raw_predictions = self.inn(*self.expand_batch(batch_sample))
+        self.log('train_acc_step', self.accuracy(raw_predictions, batch_sample["labels"]))
         predictions = torch.log(raw_predictions)
         loss = self.criterion(predictions, batch_sample["labels"])
         predicted_pos = torch.sum(raw_predictions[:, 1] > 0.5)
