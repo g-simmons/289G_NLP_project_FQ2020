@@ -46,7 +46,8 @@ class INNModel(pl.LightningModule):
 
         if self.encoding_method == "bert":
             self.bert_config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
-            self.bert_config.output_hidden_states = output_bert_hidden_states
+            if self.output_bert_hidden_states:
+                self.bert_config.output_hidden_states = output_bert_hidden_states
             self.bert = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', config=self.bert_config)
         else:
             self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
@@ -244,6 +245,7 @@ class INNModelLightning(pl.LightningModule):
         vocab_dict,
         element_to_idx,
         encoding_method,
+        output_bert_hidden_states,
         word_embedding_dim,
         relation_embedding_dim,
         hidden_dim,
@@ -262,6 +264,7 @@ class INNModelLightning(pl.LightningModule):
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
             encoding_method=encoding_method,
+            output_bert_hidden_states = output_bert_hidden_states,
             word_embedding_dim=word_embedding_dim,
             relation_embedding_dim=relation_embedding_dim,
             hidden_dim=hidden_dim,
