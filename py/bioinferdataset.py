@@ -24,6 +24,9 @@ from multiprocessing import Pool
 from itertools import product
 import istarmap
 
+import pandas as pd
+from transformers import *
+
 from config import (
     ENTITY_PREFIX,
     PREDICATE_PREFIX,
@@ -37,6 +40,7 @@ from config import (
     MAX_ENTITY_TOKENS,
     PREPPED_DATA_PATH,
     EXCLUDE_SAMPLES,
+    BERT,
 )
 
 
@@ -125,6 +129,8 @@ class BioInferDataset(Dataset):
         self.element_to_idx = {elements[i]: i for i in range(len(elements))}
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
+        #Bert Tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased') 
 
     def __len__(self):
         return len(self.sample_list)
@@ -176,16 +182,47 @@ class BioInferDataset(Dataset):
             nkis,
             node_idx_to_element_idxs,
         ) = self.get_relation_graphs_from_sentence(sentence, entity_locs)
-        sample = {
+
+        if BERT:
+            input_ids,attention_mask = self.Bert_Tokens(sentence.getText())
+            sample = {
             "text": sentence.getText(),
-            "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+            "tokens": input_ids,
+            "mask": attention_mask,
             "element_names": entity_names,
             "element_locs": entity_locs,
             "entity_spans": entity_spans,
             "relation_graphs": graphs,
             "node_idx_to_element_idxs": node_idx_to_element_idxs,
-        }
+            }
+        else:
+            sample = {
+                "text": sentence.getText(),
+                "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+                "element_names": entity_names,
+                "element_locs": entity_locs,
+                "entity_spans": entity_spans,
+                "relation_graphs": graphs,
+                "node_idx_to_element_idxs": node_idx_to_element_idxs,
+            }
         return sample
+
+
+    def Bert_Tokens(self, sentence):
+        tokenized = self.tokenizer.encode_plus(
+                            text=sentence,  # the sentence to be encoded
+                            add_special_tokens=True,  # Add [CLS] and [SEP]
+                            max_length = 147,  # maximum length of a sentence
+                            pad_to_max_length=True,  # Add [PAD]s
+                            truncation = True,
+                        #     padding=True,
+                            return_attention_mask = True,  # Generate the attention mask
+                        #     return_tensors = 'pt',  # ask the function to return PyTorch tensors
+                        )
+        input_ids = torch.LongTensor([np.array(tokenized['input_ids'])])
+        attention_mask = torch.LongTensor([np.array(tokenized['attention_mask'])])
+        return input_ids,attention_mask
+
 
     def create_vocab_dictionary(self, parser):
         vocab = set()

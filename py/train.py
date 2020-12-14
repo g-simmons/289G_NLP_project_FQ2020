@@ -38,6 +38,7 @@ from config import (
     XML_PATH,
     PREPPED_DATA_PATH,
     LEARNING_RATE,
+    BERT,
     EXCLUDE_SAMPLES
 )
 
@@ -80,6 +81,7 @@ if __name__ == "__main__":
         the_batch_sample = dict()
 
         token_list = []
+        mask_list = []                          #BERT modified
         entity_spans_list = []
         element_names_list = []
         t_list = []
@@ -93,6 +95,7 @@ if __name__ == "__main__":
 
             # put the sample's contents into its appropriate list
             token_list.append(curr_sample["tokens"])
+            mask_list.append(curr_sample["mask"])                                   #Bert modified
             entity_spans_list.append(curr_sample["entity_spans"].long())
             element_names_list.append(torch.flatten(curr_sample["element_names"]))
             t_list.append(curr_sample["T"])
@@ -109,6 +112,7 @@ if __name__ == "__main__":
         # sorts other inputs accordingly to how the token list was sorted
         entity_spans_list = [entity_spans_list[index] for index in argsort_list]
         element_names_list = [element_names_list[index] for index in argsort_list]
+        mask_list = [mask_list[index] for index in argsort_list]                #BERT Modified
         t_list = [t_list[index] for index in argsort_list]
         s_list = [s_list[index] for index in argsort_list]
         labels_list = [labels_list[index] for index in argsort_list]
@@ -122,6 +126,7 @@ if __name__ == "__main__":
         # if the batch size is 1, then we need to add a dimension of size 1 to represent the batch size
         if len(data) == 1:
             the_batch_sample["tokens"] = token_list[0].unsqueeze(1)
+            the_batch_sample["mask"] = mask_list[0].unsqueeze(1)                                #BERT modified
             the_batch_sample["entity_spans"] = entity_spans_list[0].unsqueeze(1)
             the_batch_sample["element_names"] = element_names_list[0].unsqueeze(1)
             the_batch_sample["T"] = t_list[0].unsqueeze(1)
@@ -132,6 +137,8 @@ if __name__ == "__main__":
             the_batch_sample["tokens"] = pad_sequence(
                 token_list, padding_value=dataset.vocab_dict["UNK"]
             )
+            the_batch_sample["mask"] = pad_sequence(mask_list, padding_value=0)                 #BERT modified
+
             the_batch_sample["entity_spans"] = pad_sequence(
                 entity_spans_list, padding_value=-1
             )

@@ -5,6 +5,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 from daglstmcell import DAGLSTMCell
 
+from transformers import *
+
 from config import (
     ENTITY_PREFIX,
     PREDICATE_PREFIX,
@@ -18,6 +20,8 @@ from config import (
     MAX_ENTITY_TOKENS,
     CELL_STATE_CLAMP_VAL,
     HIDDEN_STATE_CLAMP_VAL,
+    HIDDEN_DIM_BERT,
+    BERT,
     LEARNING_RATE
 )
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
@@ -50,6 +54,7 @@ class INNModel(pl.LightningModule):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
         self.hidden_dim = hidden_dim
+        self.hidden_dim_bert = HIDDEN_DIM_BERT
         self.relation_embedding_dim = relation_embedding_dim
 
         self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
@@ -58,7 +63,7 @@ class INNModel(pl.LightningModule):
             len(element_to_idx.keys()), self.relation_embedding_dim
         )
 
-        self.attn_scores = nn.Linear(in_features=self.hidden_dim * 2, out_features=1)
+        self.attn_scores = nn.Linear(in_features=self.hidden_dim_bert, out_features=1)   #changed 2 * HIDDEN_DIM to HIDDEN_DIM_BERT
 
         self.blstm = nn.LSTM(
             input_size=self.word_embedding_dim,
@@ -70,10 +75,14 @@ class INNModel(pl.LightningModule):
         self.cell = cell
 
         self.output_linear = nn.Sequential(
-            nn.Linear(2 * self.hidden_dim, 4 * self.hidden_dim),
+            nn.Linear(self.hidden_dim_bert, 4 * self.hidden_dim),        #changed from 2 * self.hidden_dim to HIDDEN_DIM_BERT
             nn.Linear(4 * self.hidden_dim, 2),
         )
 
+        self.config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
+        #uncomment when need to concatenate
+        #config.output_hidden_states =True
+        self.Bert = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', config=self.config)
 
     def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
         """Apply attention mechanism to entity representation.
@@ -109,7 +118,7 @@ class INNModel(pl.LightningModule):
                     curr_batch_attn_weights, blstm_out[i, batch_entry_num].unsqueeze(0)
                 )
 
-                # creates a vector of length D (512) and stores it in H_new
+                # creates a vector of length D (512) or (768 for bert) and stores it in H_new
                 h_entity = h_entity.sum(axis=0)
                 H_new[i, batch_entry_num] = h_entity
 
@@ -143,10 +152,10 @@ class INNModel(pl.LightningModule):
         return to_predict
 
     def forward(
-        self, tokens, entity_spans, element_names, T, S, entity_spans_size, tokens_size
+        self, tokens, mask, entity_spans, element_names, T, S, entity_spans_size, tokens_size
     ):
         curr_batch_size = entity_spans.shape[1]
-
+        '''
         # gets the embedding for each token
         embedded_sentence = self.word_embeddings(tokens)
         # to make computation faster, gets rid of padding by packing the batch tensor
@@ -155,9 +164,17 @@ class INNModel(pl.LightningModule):
         blstm_out, _ = self.blstm(embedded_sentence)
         # unpacks the output tensor (re-adds the padding) so that other functions can use it
         blstm_out, _ = pad_packed_sequence(blstm_out)
+        '''
+        #taking the last layer of bert and switching batch size and sequence lenght to make it similar to blstm output
+        tokens = tokens.squeeze(0)
+        mask = mask.squeeze(0)
+
+        out = self.Bert(tokens,attention_mask=mask) 
+        bert_out = out[0]
+        bert_out = bert_out.permute(1,0,2)
         # gets the hidden vector for each entity and stores them in H
-        H = torch.randn(T.shape[0], curr_batch_size, 2 * HIDDEN_DIM).detach().to(self.device)
-        H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
+        H = torch.randn(T.shape[0], curr_batch_size, self.word_embedding_dim).detach().to(self.device)       #changed 2 * HIDDEN_DIM to word_embedding_dim
+        H = self.get_h_entities(entity_spans, bert_out, H, curr_batch_size)
 
         predictions = []
 
@@ -236,7 +253,7 @@ class INNModelLightning(pl.LightningModule):
     ):
         super().__init__()
         self.cell = DAGLSTMCell(
-            hidden_dim=2 * hidden_dim,
+            hidden_dim=HIDDEN_DIM_BERT,              #changed from 2 * hidden_dim to HIDDEN_DIM_BERT
             relation_embedding_dim=relation_embedding_dim,
             max_inputs=2,
             hidden_state_clamp_val=hidden_state_clamp_val,
@@ -258,6 +275,7 @@ class INNModelLightning(pl.LightningModule):
     def forward(self, batch_sample):
         predictions = self.inn(
             batch_sample["tokens"],
+            batch_sample["mask"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
             batch_sample["H"],
@@ -272,6 +290,7 @@ class INNModelLightning(pl.LightningModule):
         opt = self.optimizers()
         raw_predictions = self.inn(
             batch_sample["tokens"],
+            batch_sample["mask"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
             batch_sample["T"],
@@ -283,12 +302,14 @@ class INNModelLightning(pl.LightningModule):
         loss = self.criterion(predictions, batch_sample["labels"])
         if len(predictions) > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
-            self.manual_optimizer_step(opt)
+            opt.step()
+            # self.manual_optimizer_step(opt)
             self.logger.experiment.log({"loss": loss})
 
     def validation_step(self, batch_sample, batch_idx):
         raw_predictions = self.inn(
             batch_sample["tokens"],
+            batch_sample["mask"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
             batch_sample["T"],
