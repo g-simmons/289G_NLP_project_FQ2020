@@ -42,7 +42,6 @@ def process_sample(sample, inverse_schema):
         for e in list(T_temp.chunk(num_true_elements))
     ]
 
-    # A_temp = [a for _ in T_temp]
     labels_temp = [1 for _ in T_temp]
     layers_temp = [0 for _ in T_temp]
     is_entity_temp = [1 for _ in T_temp]
@@ -86,14 +85,13 @@ def process_sample(sample, inverse_schema):
                     T_temp = torch.arange(len(A_temp))
 
     sample["labels"] = torch.tensor(labels_temp, dtype=torch.long)
-    # sample["A"] = torch.tensor(A_temp)
     sample["T"] = T_temp = torch.arange(len(A_temp))
     sample["S"] = torch.stack(S_temp)
     sample["element_names"] = torch.tensor(element_names)
     sample["L"] = torch.tensor(layers_temp)
     sample["is_entity"] = torch.tensor(is_entity_temp)
 
-    # only need tokens, entity_spans, element_names, A, T, S, labels
+    # only need certain elements from data
     del sample["relation_graphs"]
     del sample["node_idx_to_element_idxs"]
     del sample["text"]

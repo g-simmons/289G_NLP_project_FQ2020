@@ -1,6 +1,7 @@
 import pytorch_lightning as pl
 import torch
 from torch import nn
+
 from config import *
 
 
@@ -9,54 +10,61 @@ class DAGLSTMCell(pl.LightningModule):
     # original tree-lstm implementation, modified here
     def __init__(
         self,
-        hidden_dim: int,
-        relation_embedding_dim: int,
+        blstm_out_dim: int,
         max_inputs: int,
         hidden_state_clamp_val: float,
         cell_state_clamp_val: float,
     ):
         super(DAGLSTMCell, self).__init__()
-        self.hidden_dim = hidden_dim
-        self.relation_embedding_dim = relation_embedding_dim
+        self.hidden_dim = blstm_out_dim
+        self.relation_embedding_dim = self.hidden_dim
         self.max_inputs = max_inputs
         self.hidden_state_clamp_val = hidden_state_clamp_val
         self.cell_state_clamp_val = cell_state_clamp_val
 
-        ioc_out_dim = 3 * hidden_dim
-        self.W_ioc_hat = nn.Linear(relation_embedding_dim, ioc_out_dim, bias=False)
-        self.U_ioc_hat = nn.Linear(max_inputs * hidden_dim, ioc_out_dim, bias=False)
+        ioc_out_dim = 3 * self.hidden_dim
+        self.W_ioc_hat = nn.Linear(self.relation_embedding_dim, ioc_out_dim, bias=False)
+        self.U_ioc_hat = nn.Linear(
+            max_inputs * self.hidden_dim, ioc_out_dim, bias=False
+        )
         self.b_ioc_hat = nn.Parameter(torch.zeros(ioc_out_dim))
 
-        f_out_dim = 2 * hidden_dim
-        self.W_fs = nn.Linear(relation_embedding_dim, f_out_dim, bias=False)
-        self.U_fs = nn.Linear(max_inputs * hidden_dim, f_out_dim, bias=False)
+        f_out_dim = 2 * self.hidden_dim
+        self.W_fs = nn.Linear(self.relation_embedding_dim, f_out_dim, bias=False)
+        self.U_fs = nn.Linear(max_inputs * self.hidden_dim, f_out_dim, bias=False)
         self.b_fs = nn.Parameter(torch.zeros(f_out_dim))
 
     def init_cell_state(self):
         return torch.zeros(1, self.hidden_dim).clone().detach().requires_grad_(True)
 
-    def _validate_inputs(self, H, C, element_embeddings, S):
-        n_args = S.shape[0] * 2
+    def _validate_inputs(self, hidden_vectors, cell_states, element_embeddings, S):
+        if not element_embeddings.shape[0] == S.shape[0]:
+            raise ValueError("element embeddings and S should have same shape[0]")
+        if not hidden_vectors.shape[0] == cell_states.shape[0]:
+            raise ValueError("hidden_vectors and cell_states should have same shape[0]")
+
         n_entities = element_embeddings.shape[0]
-        assert n_args == 2 * n_entities
-        assert element_embeddings.shape[1] == self.relation_embedding_dim
-        assert S.shape[0] == n_entities
-        assert S.shape[1] == 2
+        n_argsets = hidden_vectors.shape[0]
 
-        return H, C, element_embeddings, S, n_entities, n_args
+        if not n_argsets == n_entities:
+            raise ValueError("shape[0] for hidden_vectors and cell_states should be twice shape[0] for element embeddings and S")
 
-    def _val_fj_cell_states(self, fj, cell_states, n_args):
-        assert cell_states.shape[0] == n_args
-        assert fj.shape[0] == n_args
+        if not S.shape[1] == 2:
+            raise ValueError("S.shape[1] should be 2")
+
+        if not hidden_vectors.shape[1] == cell_states.shape[1] == self.hidden_dim * 2:
+            raise ValueError(f"hidden_vectors, cell_states should have shape[1] == self.hidden_dim, but have shapes {hidden_vectors.shape}, {cell_states.shape}")
+
+        return hidden_vectors, cell_states, element_embeddings, S, n_entities, n_argsets
+
+    def _val_fj_cell_states(self, fj, cell_states, n_argsets):
+        assert cell_states.shape[0] == n_argsets
+        assert fj.shape[0] == n_argsets
         assert cell_states.shape[1] == self.hidden_dim
         assert fj.shape[1] == self.hidden_dim
 
     def forward(self, hidden_vectors, cell_states, element_embeddings, S):
-        # if VAL_DIMS:
-        #     H, C, element_embeddings, S, n_entities, n_args = self._validate_inputs(
-        #         H, C, element_embeddings, S
-        #     )
-
+        hidden_vectors, cell_states, element_embeddings, S, n_entities, n_argsets = self._validate_inputs(hidden_vectors, cell_states, element_embeddings, S)
         v = hidden_vectors
 
         ioc_hat = self.W_ioc_hat(element_embeddings)
@@ -71,9 +79,6 @@ class DAGLSTMCell(pl.LightningModule):
         fj = fj.reshape(-1, fj.shape[1] // 2)
 
         cell_states = cell_states.reshape(-1, cell_states.shape[1] // 2)
-        if VAL_DIMS:
-            self._val_fj_cell_states(fj, cell_states, n_args)
-
         fjcj = torch.mul(fj, cell_states)
         fj_mul_css = torch.stack(
             [torch.sum(fjcj_split, dim=0) for fjcj_split in fjcj.split(2)]

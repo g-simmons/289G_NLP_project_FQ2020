@@ -1,12 +1,11 @@
+import pytorch_lightning as pl
 import torch
 from torch import nn
 from torch.nn import functional as functional
 
-from daglstmcell import DAGLSTMCell
-
 from config import *
 from constants import *
-import pytorch_lightning as pl
+from daglstmcell import DAGLSTMCell
 
 
 class INNModel(pl.LightningModule):
@@ -78,9 +77,9 @@ class INNModel(pl.LightningModule):
         for sample in range(curr_batch_size):
             sample_entity_indices = [idx[idx >= 0] for idx in entity_indices[sample]]
             for idx in sample_entity_indices:
-                sample_attn_scores = attn_scores[sample][idx]
+                sample_attn_scores = attn_scores[sample][idx.long()]
                 sample_attn_weights = functional.softmax(sample_attn_scores, dim=0)
-                blstm_vecs = blstm_out[sample][idx]
+                blstm_vecs = blstm_out[sample][idx.long()]
                 h_entity = torch.mul(sample_attn_weights, blstm_vecs).sum(axis=0)
                 h_entities.append(h_entity)
 
@@ -99,7 +98,6 @@ class INNModel(pl.LightningModule):
         tokens,
         entity_spans,
         element_names,
-        A,
         T,
         S,
         L,
@@ -114,20 +112,17 @@ class INNModel(pl.LightningModule):
         ]
 
         # gets the hidden vector for each entity and stores them in H
-        H = torch.randn(T.shape[0], BLSTM_OUT_DIM).detach().to(self.device)
+        H = torch.randn(T.shape[0], self.word_embedding_dim * 2).detach().to(self.device)
         H = self.get_h_entities(
             entity_spans, blstm_out, token_splits, H, curr_batch_size, is_entity
         )
         H.requires_grad_()
-        C = (
-            torch.zeros(T.shape[0], CELL_STATE_DIM)
-            .clone()
-            .detach()
-            .to(self.device)
-        )
+        C = torch.zeros(T.shape[0], self.word_embedding_dim * 2).clone().detach().to(self.device)
         C.requires_grad_()
 
-        predictions = [PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0,T.shape[0])]
+        predictions = [
+            PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
+        ]
         predictions = torch.stack(predictions).to(self.device)
         predictions.requires_grad_()
 
@@ -149,7 +144,7 @@ class INNModel(pl.LightningModule):
                 C[parent_mask, :] = c
                 logits = self.output_linear(H[parent_mask, :])
                 sm_logits = functional.softmax(logits, dim=0)
-                predictions[parent_mask,:] = sm_logits
+                predictions[parent_mask, :] = sm_logits
 
         predictions = predictions.clone().clamp_(min=1e-3)
         return predictions
@@ -161,14 +156,12 @@ class INNModelLightning(pl.LightningModule):
         vocab_dict,
         element_to_idx,
         word_embedding_dim,
-        relation_embedding_dim,
         cell_state_clamp_val,
         hidden_state_clamp_val,
     ):
         super().__init__()
         self.cell = DAGLSTMCell(
-            hidden_dim=2 * word_embedding_dim,
-            relation_embedding_dim=relation_embedding_dim,
+            blstm_out_dim=2 * word_embedding_dim,
             max_inputs=2,
             hidden_state_clamp_val=hidden_state_clamp_val,
             cell_state_clamp_val=cell_state_clamp_val,
@@ -177,7 +170,7 @@ class INNModelLightning(pl.LightningModule):
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
             word_embedding_dim=word_embedding_dim,
-            relation_embedding_dim=relation_embedding_dim,
+            relation_embedding_dim=2 * word_embedding_dim,
             cell=self.cell,
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
@@ -209,7 +202,6 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["tokens"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
-            batch_sample["A"],
             batch_sample["T"],
             batch_sample["S"],
             batch_sample["L"],

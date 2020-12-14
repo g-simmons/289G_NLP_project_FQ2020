@@ -1,24 +1,23 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-import sys
 import os
-import torch
-from torch.utils.data import DataLoader, random_split
+import sys
+
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning.loggers import WandbLogger
+from torch.utils.data import DataLoader, random_split
 
 sys.path.append("../py")
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
 
-from config import *
-
-BATCH_SIZE = 2
-
 from bioinferdataset import BioInferDataset
+from config import *
 from INN import INNModelLightning
 
-def update_batch_S(new_batch,batch):
+
+def update_batch_S(new_batch, batch):
     S = batch[0]["S"]
     for i in range(1, len(batch)):
         s_new = batch[i]["S"]
@@ -27,15 +26,18 @@ def update_batch_S(new_batch,batch):
     new_batch["S"] = S
     return new_batch
 
-def collate_list_keys(new_batch,batch,list_keys):
+
+def collate_list_keys(new_batch, batch, list_keys):
     for key in list_keys:
         new_batch[key] = [sample[key] for sample in batch]
     return new_batch
 
-def collate_cat_keys(new_batch,batch,cat_keys):
+
+def collate_cat_keys(new_batch, batch, cat_keys):
     for key in cat_keys:
         new_batch[key] = torch.cat([sample[key] for sample in batch])
     return new_batch
+
 
 def collate_func(batch):
     cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
@@ -45,14 +47,15 @@ def collate_func(batch):
         batch = [batch]
 
     new_batch = {}
-    new_batch = collate_list_keys(new_batch,batch,list_keys)
-    new_batch = collate_cat_keys(new_batch,batch,cat_keys)
-    new_batch = update_batch_S(new_batch,batch)
+    new_batch = collate_list_keys(new_batch, batch, list_keys)
+    new_batch = collate_cat_keys(new_batch, batch, cat_keys)
+    new_batch = update_batch_S(new_batch, batch)
 
     T = torch.arange(len(new_batch["element_names"]))
     new_batch["T"] = T
 
     return new_batch
+
 
 def set_device():
     if torch.cuda.is_available():
@@ -63,8 +66,10 @@ def set_device():
         device = torch.device("cpu")
         print("Running on the CPU")
         GPUS = 0
+    return GPUS
 
-def load_data():
+
+def load_dataset():
     dataset = BioInferDataset(XML_PATH)
     if os.path.isfile(PREPPED_DATA_PATH):
         dataset.load_samples_from_pickle(PREPPED_DATA_PATH)
@@ -73,6 +78,7 @@ def load_data():
         dataset.samples_to_pickle(PREPPED_DATA_PATH)
     return dataset
 
+
 def split_data(dataset):
     train_max_range = round(0.8 * len(dataset))
     train_idx = range(0, train_max_range)
@@ -80,8 +86,9 @@ def split_data(dataset):
     train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
     return train_set, val_set
 
+
 if __name__ == "__main__":
-    set_device()
+    GPUS = set_device()
     dataset = load_dataset()
     train_set, val_set = split_data(dataset)
 
@@ -90,9 +97,7 @@ if __name__ == "__main__":
     train_data_loader = DataLoader(
         train_set, collate_fn=collate_func, batch_size=BATCH_SIZE
     )
-    val_data_loader = DataLoader(
-        val_set, collate_fn=collate_func, batch_size=1
-    )
+    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1)
 
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
