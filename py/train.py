@@ -11,18 +11,7 @@ from pytorch_lightning.loggers import WandbLogger
 sys.path.append("../py")
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
 
-from config import (
-    WORD_EMBEDDING_DIM,
-    RELATION_EMBEDDING_DIM,
-    BATCH_SIZE,
-    MAX_LAYERS,
-    CELL_STATE_CLAMP_VAL,
-    HIDDEN_STATE_CLAMP_VAL,
-    XML_PATH,
-    PREPPED_DATA_PATH,
-    LEARNING_RATE,
-    EXCLUDE_SAMPLES,
-)
+from config import *
 
 BATCH_SIZE = 2
 
@@ -42,11 +31,15 @@ def collate_func(batch):
         new_batch[key] = [sample[key] for sample in batch]
 
     S = batch[0]["S"]
+    A = torch.ones(len(batch[0]["T"])) * 1
     for i in range(1, len(batch)):
         s_new = batch[i]["S"]
         s_new[s_new > -1] += batch[i - 1]["T"].shape[0]
         S = torch.cat([S, s_new])
+        a_new = torch.ones(len(batch[i]["T"])) * i
+        A = torch.cat([A,a_new])
     new_batch["S"] = S
+    new_batch["A"] = A
 
     T = torch.arange(len(new_batch["S"]))
     new_batch["T"] = T
@@ -80,10 +73,10 @@ if __name__ == "__main__":
     train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
 
     train_data_loader = DataLoader(
-        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE, num_workers=4
+        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE
     )
     val_data_loader = DataLoader(
-        val_set, collate_fn=collate_func, batch_size=1, num_workers=4
+        val_set, collate_fn=collate_func, batch_size=1
     )
 
     model = INNModelLightning(
@@ -117,7 +110,7 @@ if __name__ == "__main__":
 
     trainer = pl.Trainer(
         gpus=GPUS,
-        progress_bar_refresh_rate=20,
+        progress_bar_refresh_rate=1,
         automatic_optimization=False,
         num_sanity_val_steps=2,
         max_epochs=3,

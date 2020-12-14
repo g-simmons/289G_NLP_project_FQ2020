@@ -5,6 +5,7 @@ from torch.nn import functional as functional
 from daglstmcell import DAGLSTMCell
 
 from config import *
+from constants import *
 import pytorch_lightning as pl
 
 
@@ -125,15 +126,13 @@ class INNModel(pl.LightningModule):
             .requires_grad_()
             .to(self.device)
         )
-        predictions = torch.stack(
-            [torch.tensor([0.999, 0.001]) for _ in range(T.shape[0])]
-        )  # default false
 
-        # predict true for entities
-        predictions[is_entity == 1] = torch.tensor([0.001, 0.999])
+        predictions = [PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(T.shape[0])]
+        predictions = torch.stack(predictions).requires_grad_()
 
         for layer in torch.unique(L):
             if layer > 0:
+                predictions = predictions.clone()
                 parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
                 element_embeddings = self.element_embeddings(element_names[parent_mask])
                 h, c = self.cell.forward(H, C, element_embeddings, S[parent_mask, :])
@@ -143,10 +142,9 @@ class INNModel(pl.LightningModule):
                 C[parent_mask, :] = c
                 logits = self.output_linear(H[parent_mask, :])
                 sm_logits = functional.softmax(logits, dim=0)
-                predictions[parent_mask] = sm_logits
+                predictions[parent_mask,:] = sm_logits
 
-        predictions.clamp_(min=1e-3)
-
+        predictions = predictions.clone().clamp_(min=1e-3)
         return predictions
 
 
@@ -181,7 +179,7 @@ class INNModelLightning(pl.LightningModule):
         self.param_names = [p[0] for p in self.inn.named_parameters()]
 
     def forward(self, batch_sample):
-        predictions = self.inn(self.expand_batch(batch_sample))
+        predictions = self.inn(*self.expand_batch(batch_sample))
         return predictions
 
     def training_step(self, batch_sample, batch_idx):
@@ -189,7 +187,7 @@ class INNModelLightning(pl.LightningModule):
             {"curr_batch_size": len(batch_sample["entity_spans"])}
         )
         opt = self.optimizers()
-        raw_predictions = self.inn(self.expand_batch(batch_sample))
+        raw_predictions = self.inn(*self.expand_batch(batch_sample))
         predictions = torch.log(raw_predictions)
         loss = self.criterion(predictions, batch_sample["labels"])
         predicted_pos = torch.sum(raw_predictions[:, 1] > 0.5)
@@ -200,7 +198,7 @@ class INNModelLightning(pl.LightningModule):
             self.logger.experiment.log({"loss": loss})
 
     def expand_batch(self, batch_sample):
-        return *(
+        return (
             batch_sample["tokens"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
@@ -212,7 +210,7 @@ class INNModelLightning(pl.LightningModule):
         )
 
     def validation_step(self, batch_sample, batch_idx):
-        raw_predictions = self.inn(self.expand_batch(batch_sample))
+        raw_predictions = self.inn(*self.expand_batch(batch_sample))
         predictions = torch.log(raw_predictions).to(self.device)
         loss = self.criterion(predictions, batch_sample["labels"])
         self.logger.experiment.log({"val_loss": loss})
