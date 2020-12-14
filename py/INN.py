@@ -159,6 +159,9 @@ class INNModel(pl.LightningModule):
             bert_out = out[0]
             encoding_out = bert_out.permute(1,0,2)
             # gets the hidden vector for each entity and stores them in H
+            H = torch.randn(T.shape[0], curr_batch_size, self.word_embedding_dim).detach().to(self.device)       #changed 2 * HIDDEN_DIM to word_embedding_dim
+            H = self.get_h_entities(entity_spans, encoding_out, H, curr_batch_size)
+
         elif self.encoding_method == "from-scratch":
             # gets the embedding for each token
             embedded_sentence = self.word_embeddings(tokens)
@@ -168,10 +171,8 @@ class INNModel(pl.LightningModule):
             blstm_out, _ = self.blstm(embedded_sentence)
             # unpacks the output tensor (re-adds the padding) so that other functions can use it
             encoding_out, _ = pad_packed_sequence(blstm_out)
-
-
-        H = torch.randn(T.shape[0], curr_batch_size, self.word_embedding_dim).detach().to(self.device)       #changed 2 * HIDDEN_DIM to word_embedding_dim
-        H = self.get_h_entities(entity_spans, encoding_out, H, curr_batch_size)
+            H = torch.randn(T.shape[0], curr_batch_size, 2 * HIDDEN_DIM).detach().to(self.device)
+            H = self.get_h_entities(entity_spans, blstm_out, H, curr_batch_size)
 
         predictions = []
 
