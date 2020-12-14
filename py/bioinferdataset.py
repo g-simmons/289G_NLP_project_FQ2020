@@ -27,21 +27,7 @@ import istarmap
 import pandas as pd
 from transformers import *
 
-from config import (
-    ENTITY_PREFIX,
-    PREDICATE_PREFIX,
-    EPOCHS,
-    WORD_EMBEDDING_DIM,
-    VECTOR_DIM,
-    HIDDEN_DIM,
-    RELATION_EMBEDDING_DIM,
-    BATCH_SIZE,
-    MAX_LAYERS,
-    MAX_ENTITY_TOKENS,
-    PREPPED_DATA_PATH,
-    EXCLUDE_SAMPLES,
-    BERT,
-)
+from config import *
 
 
 def process_sample(sample, inverse_schema):
@@ -130,7 +116,7 @@ class BioInferDataset(Dataset):
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
         #Bert Tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased') 
+        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
     def __len__(self):
         return len(self.sample_list)

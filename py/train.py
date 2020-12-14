@@ -22,25 +22,7 @@ import wandb
 sys.path.append("../py")
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
 
-from config import (
-    ENTITY_PREFIX,
-    PREDICATE_PREFIX,
-    EPOCHS,
-    WORD_EMBEDDING_DIM,
-    VECTOR_DIM,
-    HIDDEN_DIM,
-    RELATION_EMBEDDING_DIM,
-    BATCH_SIZE,
-    MAX_LAYERS,
-    MAX_ENTITY_TOKENS,
-    CELL_STATE_CLAMP_VAL,
-    HIDDEN_STATE_CLAMP_VAL,
-    XML_PATH,
-    PREPPED_DATA_PATH,
-    LEARNING_RATE,
-    BERT,
-    EXCLUDE_SAMPLES
-)
+from config import *
 
 BATCH_SIZE = 1
 
@@ -166,6 +148,7 @@ if __name__ == "__main__":
         hidden_dim=HIDDEN_DIM,
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
+        encoding_method=ENCODING_METHOD
     )
 
     wandb_config = {

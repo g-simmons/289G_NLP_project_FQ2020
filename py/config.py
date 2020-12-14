@@ -25,4 +25,6 @@ EXCLUDE_SAMPLES = [
     681,  # has no entities
 ]
 
-BERT = True
+# BERT = True?
+ENCODING_METHOD = "bert"
+
