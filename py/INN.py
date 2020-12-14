@@ -29,6 +29,7 @@ class INNModel(pl.LightningModule):
         vocab_dict,
         element_to_idx,
         encoding_method,
+        output_bert_hidden_states,
         word_embedding_dim,
         relation_embedding_dim,
         hidden_dim,
@@ -45,8 +46,7 @@ class INNModel(pl.LightningModule):
 
         if self.encoding_method == "bert":
             self.bert_config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
-            #uncomment when need to concatenate
-            #self.bert_config.output_hidden_states =True
+            self.bert_config.output_hidden_states = output_bert_hidden_states
             self.bert = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', config=self.bert_config)
         else:
             self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
@@ -234,6 +234,7 @@ class INNModelLightning(pl.LightningModule):
         self,
         vocab_dict,
         element_to_idx,
+        encoding_method,
         word_embedding_dim,
         relation_embedding_dim,
         hidden_dim,
@@ -251,6 +252,7 @@ class INNModelLightning(pl.LightningModule):
         self.inn = INNModel(
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
+            encoding_method=encoding_method,
             word_embedding_dim=word_embedding_dim,
             relation_embedding_dim=relation_embedding_dim,
             hidden_dim=hidden_dim,
@@ -292,7 +294,6 @@ class INNModelLightning(pl.LightningModule):
         if len(predictions) > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
             opt.step()
-            # self.manual_optimizer_step(opt)
             self.logger.experiment.log({"loss": loss})
 
     def validation_step(self, batch_sample, batch_idx):
