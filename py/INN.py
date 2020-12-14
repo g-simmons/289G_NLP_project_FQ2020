@@ -76,6 +76,7 @@ class INNModel(pl.LightningModule):
 
         h_entities = []
         for sample in range(curr_batch_size):
+            print(entity_indices[sample])
             sample_entity_indices = [idx[idx >= 0] for idx in entity_indices[sample]]
             for idx in sample_entity_indices:
                 sample_attn_scores = attn_scores[sample][idx]
@@ -114,30 +115,36 @@ class INNModel(pl.LightningModule):
         ]
 
         # gets the hidden vector for each entity and stores them in H
-        _, candidate_splits = torch.unique_consecutive(A, return_counts=True)
         H = torch.randn(T.shape[0], BLSTM_OUT_DIM).detach().to(self.device)
         H = self.get_h_entities(
             entity_spans, blstm_out, token_splits, H, curr_batch_size, is_entity
         )
+        H.requires_grad_()
         C = (
             torch.zeros(T.shape[0], CELL_STATE_DIM)
             .clone()
             .detach()
-            .requires_grad_()
             .to(self.device)
         )
+        C.requires_grad_()
 
-        predictions = [PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(T.shape[0])]
-        predictions = torch.stack(predictions).requires_grad_()
+        predictions = [PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0,T.shape[0])]
+        predictions = torch.stack(predictions).to(self.device)
+        predictions.requires_grad_()
 
         for layer in torch.unique(L):
             if layer > 0:
                 predictions = predictions.clone()
                 parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
+                args_predicted = torch.all(torch.ge(predictions[S][:,:,1], 0.5),dim=1)
+                parent_mask = torch.logical_and(parent_mask,args_predicted)
                 element_embeddings = self.element_embeddings(element_names[parent_mask])
-                h, c = self.cell.forward(H, C, element_embeddings, S[parent_mask, :])
-                H = H.clone()
-                C = C.clone()
+                s = S[parent_mask, :]
+                v = H[S]
+                v = v.flatten(start_dim=1)
+                cell_states = C[S]
+                cell_states = cell_states.flatten(start_dim=1)
+                h, c = self.cell.forward(v, c, element_embeddings, s)
                 H[parent_mask, :] = h
                 C[parent_mask, :] = c
                 logits = self.output_linear(H[parent_mask, :])

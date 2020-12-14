@@ -51,21 +51,13 @@ class DAGLSTMCell(pl.LightningModule):
         assert cell_states.shape[1] == self.hidden_dim
         assert fj.shape[1] == self.hidden_dim
 
-    def _get_concatenated_cell_states(self, C, S):
-        cell_states = torch.stack([torch.flatten(C[idx]) for idx in S])
-        return cell_states
+    def forward(self, hidden_vectors, cell_states, element_embeddings, S):
+        # if VAL_DIMS:
+        #     H, C, element_embeddings, S, n_entities, n_args = self._validate_inputs(
+        #         H, C, element_embeddings, S
+        #     )
 
-    def _get_concatenated_hidden_states(self, H, S):
-        v = torch.stack([torch.flatten(H[idx]) for idx in S])
-        return v
-
-    def forward(self, H, C, element_embeddings, S):
-        if VAL_DIMS:
-            H, C, element_embeddings, S, n_entities, n_args = self._validate_inputs(
-                H, C, element_embeddings, S
-            )
-        cell_states = self._get_concatenated_cell_states(C, S)
-        v = self._get_concatenated_hidden_states(H, S)
+        v = hidden_vectors
 
         ioc_hat = self.W_ioc_hat(element_embeddings)
         ioc_hat += self.U_ioc_hat(v)
@@ -74,14 +66,10 @@ class DAGLSTMCell(pl.LightningModule):
         i, o, c_hat = torch.chunk(ioc_hat, 3, dim=1)
         i, o, c_hat = torch.sigmoid(i), torch.sigmoid(o), torch.tanh(c_hat)
 
-        fj = self.W_fs(element_embeddings)
+        fj = torch.sigmoid(self.W_fs(element_embeddings) + self.U_fs(v) + self.b_fs)
 
-        vbc = v.repeat(1, self.max_inputs)
-        fj += self.U_fs(v)
-        fj += self.b_fs
-
-        fj = torch.sigmoid(fj)
         fj = fj.reshape(-1, fj.shape[1] // 2)
+
         cell_states = cell_states.reshape(-1, cell_states.shape[1] // 2)
         if VAL_DIMS:
             self._val_fj_cell_states(fj, cell_states, n_args)
