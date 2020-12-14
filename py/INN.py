@@ -131,8 +131,6 @@ class INNModel(pl.LightningModule):
             if layer > 0:
                 predictions = predictions.clone()
                 parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
-                # args_predicted = torch.all(torch.ge(predictions[S][:,:,1], 0.5),dim=1)
-                # parent_mask = torch.logical_and(parent_mask,args_predicted)
                 element_embeddings = self.element_embeddings(element_names[parent_mask])
                 s = S[parent_mask, :]
                 v = H[s]

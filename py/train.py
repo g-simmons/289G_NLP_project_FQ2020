@@ -97,9 +97,9 @@ if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
 
     train_data_loader = DataLoader(
-        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE
+        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE, drop_last=True, shuffle=False,
     )
-    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1)
+    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1, shuffle=False)
 
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
