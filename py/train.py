@@ -18,36 +18,43 @@ BATCH_SIZE = 2
 from bioinferdataset import BioInferDataset
 from INN import INNModelLightning
 
-def collate_func(batch):
-    cat_keys = ["element_names", "T", "L", "labels", "is_entity", "L"]
-    list_keys = ["tokens", "entity_spans"]
-
-    if type(batch) == dict:
-        batch = [batch]
-    new_batch = {}
-    for key in cat_keys:
-        new_batch[key] = torch.cat([sample[key] for sample in batch])
-    for key in list_keys:
-        new_batch[key] = [sample[key] for sample in batch]
-
+def update_batch_S(new_batch,batch):
     S = batch[0]["S"]
-    A = torch.ones(len(batch[0]["T"])) * 1
     for i in range(1, len(batch)):
         s_new = batch[i]["S"]
         s_new[s_new > -1] += batch[i - 1]["T"].shape[0]
         S = torch.cat([S, s_new])
-        a_new = torch.ones(len(batch[i]["T"])) * i
-        A = torch.cat([A,a_new])
     new_batch["S"] = S
-    new_batch["A"] = A
+    return new_batch
 
-    T = torch.arange(len(new_batch["S"]))
+def collate_list_keys(new_batch,batch,list_keys):
+    for key in list_keys:
+        new_batch[key] = [sample[key] for sample in batch]
+    return new_batch
+
+def collate_cat_keys(new_batch,batch,cat_keys):
+    for key in cat_keys:
+        new_batch[key] = torch.cat([sample[key] for sample in batch])
+    return new_batch
+
+def collate_func(batch):
+    cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
+    list_keys = ["tokens", "entity_spans"]
+
+    if type(batch) == dict:
+        batch = [batch]
+
+    new_batch = {}
+    new_batch = collate_list_keys(new_batch,batch,list_keys)
+    new_batch = collate_cat_keys(new_batch,batch,cat_keys)
+    new_batch = update_batch_S(new_batch,batch)
+
+    T = torch.arange(len(new_batch["element_names"]))
     new_batch["T"] = T
 
     return new_batch
 
-
-if __name__ == "__main__":
+def set_device():
     if torch.cuda.is_available():
         device = torch.device("cuda:0")
         print("Running on the GPU")
@@ -57,20 +64,28 @@ if __name__ == "__main__":
         print("Running on the CPU")
         GPUS = 0
 
+def load_data():
     dataset = BioInferDataset(XML_PATH)
     if os.path.isfile(PREPPED_DATA_PATH):
         dataset.load_samples_from_pickle(PREPPED_DATA_PATH)
     else:
         dataset.prep_data()
         dataset.samples_to_pickle(PREPPED_DATA_PATH)
+    return dataset
 
+def split_data(dataset):
     train_max_range = round(0.8 * len(dataset))
     train_idx = range(0, train_max_range)
     val_idx = range(train_max_range, len(dataset))
+    train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
+    return train_set, val_set
+
+if __name__ == "__main__":
+    set_device()
+    dataset = load_dataset()
+    train_set, val_set = split_data(dataset)
 
     torch.autograd.set_detect_anomaly(True)
-
-    train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
 
     train_data_loader = DataLoader(
         train_set, collate_fn=collate_func, batch_size=BATCH_SIZE
@@ -83,7 +98,6 @@ if __name__ == "__main__":
         vocab_dict=dataset.vocab_dict,
         element_to_idx=dataset.element_to_idx,
         word_embedding_dim=WORD_EMBEDDING_DIM,
-        relation_embedding_dim=RELATION_EMBEDDING_DIM,
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
     )
@@ -95,7 +109,7 @@ if __name__ == "__main__":
         "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
         "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
-        "relation_embedding_dim": RELATION_EMBEDDING_DIM,
+        "relation_embedding_dim": model.inn.relation_embedding_dim,
         "exclude_samples": EXCLUDE_SAMPLES,
     }
 
