@@ -112,15 +112,14 @@ class INNModel(pl.LightningModule):
         ]
 
         # gets the hidden vector for each entity and stores them in H
-        H = torch.randn(T.shape[0], self.word_embedding_dim * 2).to(self.device)
-        # .detach()
+        H = torch.randn(T.shape[0], self.word_embedding_dim * 2).detach().to(self.device)
         H = self.get_h_entities(
             entity_spans, blstm_out, token_splits, H, curr_batch_size, is_entity
         )
         # H.requires_grad_()
 
-        C = torch.zeros(T.shape[0], self.word_embedding_dim * 2).to(self.device)
-        # .detach().to(self.device)
+        C = torch.zeros(T.shape[0], self.word_embedding_dim * 2).detach().to(self.device)
+        # .to(self.device)
 
         predictions = [
             PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
