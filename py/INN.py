@@ -60,15 +60,23 @@ class INNModel(pl.LightningModule):
         self.element_embeddings = nn.Embedding(
             len(element_to_idx.keys()), self.relation_embedding_dim
         )
-
-        self.attn_scores = nn.Linear(in_features=self.hidden_dim_bert, out_features=1)   #changed 2 * HIDDEN_DIM to HIDDEN_DIM_BERT
+        if self.encoding_method == "bert":
+            self.attn_scores = nn.Linear(in_features=self.hidden_dim_bert, out_features=1)
+        elif self.encoding_method == "from-scratch":
+            self.attn_scores = nn.Linear(in_features=2 * self.hidden_dim, out_features=1)
 
         self.cell = cell
 
-        self.output_linear = nn.Sequential(
-            nn.Linear(self.hidden_dim_bert, 4 * self.hidden_dim),        #changed from 2 * self.hidden_dim to HIDDEN_DIM_BERT
-            nn.Linear(4 * self.hidden_dim, 2),
-        )
+        if self.encoding_method == "bert":
+            self.output_linear = nn.Sequential(
+                nn.Linear(self.hidden_dim_bert, 4 * self.hidden_dim),
+                nn.Linear(4 * self.hidden_dim, 2),
+            )
+        elif self.encoding_method == "from-scratch":
+            self.output_linear = nn.Sequential(
+                nn.Linear(2 * self.hidden_dim, 4 * self.hidden_dim),
+                nn.Linear(4 * self.hidden_dim, 2),
+            )
 
 
     def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
