@@ -1,43 +1,24 @@
-import sys
-import numpy as np
-import dgl
 import pickle
+import sys
+
+import dgl
+import numpy as np
 
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
 sys.path.append("../py/")
-from BIParser import BIParser
-from BasicClasses import RelNode
+from collections import Counter
+from itertools import product
+from multiprocessing import Pool
 
-import os
-import json
-
-from config import ENTITY_PREFIX, PREDICATE_PREFIX
-from collections import Counter, OrderedDict
-
-from torch.utils.data import Dataset, DataLoader
 import torch
+import tqdm
+from BIParser import BIParser
 from torch import nn
 from torch.nn import functional as functional
+from torch.utils.data import Dataset
 
-import tqdm
-from multiprocessing import Pool
-from itertools import product
-import istarmap
-
-from config import (
-    ENTITY_PREFIX,
-    PREDICATE_PREFIX,
-    EPOCHS,
-    WORD_EMBEDDING_DIM,
-    VECTOR_DIM,
-    HIDDEN_DIM,
-    RELATION_EMBEDDING_DIM,
-    BATCH_SIZE,
-    MAX_LAYERS,
-    MAX_ENTITY_TOKENS,
-    PREPPED_DATA_PATH,
-    EXCLUDE_SAMPLES,
-)
+from config import *
+from config import ENTITY_PREFIX, PREDICATE_PREFIX
 
 
 def get_child_indices(g, node_idx):
@@ -49,6 +30,9 @@ def sort_args(arguments):
 
 
 def process_sample(sample, inverse_schema):
+    """
+    process a single sample.
+    """
     element_names = sample["element_names"].flatten().tolist()
     num_true_elements = len(element_names)
     T_temp = torch.arange(num_true_elements)
@@ -58,7 +42,6 @@ def process_sample(sample, inverse_schema):
         for e in list(T_temp.chunk(num_true_elements))
     ]
 
-    a = 1  # TODO: only handling single sentences for now
     A_temp = [a for _ in T_temp]
     labels_temp = [1 for _ in T_temp]
     layers_temp = [0 for _ in T_temp]
@@ -67,13 +50,14 @@ def process_sample(sample, inverse_schema):
     max_layers = MAX_LAYERS
 
     for layer in range(max_layers):
-        for arg_indices in torch.combinations(T_temp):  # TODO single-argument relations?
+        for arg_indices in torch.combinations(
+            T_temp
+        ):  # TODO single-argument relations?
             arguments = [element_names[idx] for idx in arg_indices.tolist()]
             key = sort_args(arguments)
             if key in inverse_schema.keys():
                 for predicate in inverse_schema[key].keys():
                     S_temp.append(arg_indices)
-                    A_temp.append(a)
                     is_entity_temp.append(0)
                     element_names.append(predicate)
                     layers_temp.append(layer + 1)
@@ -93,7 +77,9 @@ def process_sample(sample, inverse_schema):
                                     child_indices.tolist() == arg_indices.tolist()
                                     and predicate == n_predicate
                                 ):  # check if children match and the predicate type is correct
-                                    sample["node_idx_to_element_idxs"][i][n.item()] = num_true_elements
+                                    sample["node_idx_to_element_idxs"][i][
+                                        n.item()
+                                    ] = num_true_elements
                                     L = 1  # this label is true because we found this candidate in the gold standard relation graphs
                     labels_temp.append(L)
                     num_true_elements += 1
@@ -153,7 +139,7 @@ class BioInferDataset(Dataset):
         self.sample_list = tqdm.tqdm(
             [
                 self.process_sentence(sent, self.inverse_schema)
-                for i, sent in enumerate(self.parser.bioinfer.sentences.sentences[0:32])
+                for i, sent in enumerate(self.parser.bioinfer.sentences.sentences)
                 if i not in EXCLUDE_SAMPLES
             ]
         )
