@@ -38,6 +38,7 @@ class FromScratchEncoder(pl.LightningModule):
 class BERTEncoder(pl.LightningModule):
     def __init__(self, output_bert_hidden_states):
         super().__init__()
+        print('loading pretrained BERT...')
         self.bert_config = AutoConfig.from_pretrained(
             "allenai/scibert_scivocab_uncased"
         )
@@ -48,18 +49,16 @@ class BERTEncoder(pl.LightningModule):
             "allenai/scibert_scivocab_uncased", config=self.bert_config
         )
 
-    def forward(self, bert_tokens, mask):
+    def forward(self, bert_tokens, masks):
         tokens = bert_tokens
-        tokens = tokens.squeeze(0)
-        mask = mask.squeeze(0)
 
         token_splits = [
             len(t) for t in tokens
         ]  # should be tokens or bert_tokens? check len matches later on
 
         bert_outs = []
-        for toks in tokens:
-            bert_out = self.bert(tokens, attention_mask=mask)[0]
+        for toks, mask in zip(tokens, masks):
+            bert_out = self.bert(toks, attention_mask=mask)[0]
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
 
