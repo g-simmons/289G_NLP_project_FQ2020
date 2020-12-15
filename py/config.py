@@ -18,6 +18,7 @@ XML_PATH = "../data/BioInfer_corpus_1.1.1.xml"
 WORD_EMBEDDING_DIM = 256
 BLSTM_OUT_DIM = 2 * WORD_EMBEDDING_DIM
 HIDDEN_DIM_BERT = 768
+# MASK_PREVIOUS_ARGS = False
 
 EXCLUDE_SAMPLES = [
     681,  # has no entities
