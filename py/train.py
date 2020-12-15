@@ -122,6 +122,7 @@ if __name__ == "__main__":
     )
 
     wandb_config = {
+        "GPUS": GPUS,
         "batch_size": BATCH_SIZE,
         "max_layers": MAX_LAYERS,
         "learning_rate": LEARNING_RATE,
