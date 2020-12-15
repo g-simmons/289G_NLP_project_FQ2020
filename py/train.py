@@ -105,7 +105,7 @@ if __name__ == "__main__":
         shuffle=False,
     )
     val_data_loader = DataLoader(
-        val_set, collate_fn=collate_func, batch_size=1, shuffle=False
+        val_set, collate_fn=collate_func, batch_size=VAL_BATCH_SIZE, shuffle=VAL_SHUFFLE
     )
 
     run_name = "test"
@@ -122,8 +122,10 @@ if __name__ == "__main__":
     )
 
     wandb_config = {
-        "GPUS": GPUS.cpu(),
+        "GPUS": int(GPUS),
         "batch_size": BATCH_SIZE,
+        "val_batch_size":VAL_BATCH_SIZE,
+        "val_shuffle":VAL_SHUFFLE,
         "max_layers": MAX_LAYERS,
         "learning_rate": LEARNING_RATE,
         "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
