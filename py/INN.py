@@ -131,7 +131,7 @@ class BERTEncoder(pl.LightningModule):
         token_splits = [
             len(t) for t in bert_outs
         ]  # should be tokens or bert_tokens? check len matches later on
-
+        # bert_outs = torch.unsqueeze(torch.cat(bert_outs), 0)
         return bert_outs, token_splits
 
 
@@ -170,7 +170,7 @@ class INNModel(pl.LightningModule):
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
             self.linear_in_dim = 2 * self.word_embedding_dim
-
+        print("BERT:", self.encoder.device)
         self.element_embeddings = nn.Embedding(
             len(element_to_idx.keys()), self.linear_in_dim
         )
@@ -178,7 +178,7 @@ class INNModel(pl.LightningModule):
         self.attn_scores = nn.Linear(in_features=self.linear_in_dim, out_features=1)
 
         self.cell = cell
-
+        print("DAG:", self.cell.device)
         self.output_linear = nn.Sequential(
             nn.Linear(self.linear_in_dim, 4 * self.word_embedding_dim),
             nn.Linear(4 * self.word_embedding_dim, 2),
@@ -198,9 +198,10 @@ class INNModel(pl.LightningModule):
         """
         H_new = torch.clone(H)
         attn_scores = torch.split(
-            self.attn_scores(torch.cat(encoding_out)), token_splits
+            # self.attn_scores(torch.squeeze(encoding_out)),
+            self.attn_scores(torch.cat(encoding_out).to(self.device)),
+            token_splits
         )
-
         h_entities = []
         for sample in range(curr_batch_size):
             sample_entity_indices = [idx[idx >= 0] for idx in entity_indices[sample]]
@@ -239,9 +240,10 @@ class INNModel(pl.LightningModule):
             encoding_out, token_splits = self.encoder(bert_tokens, mask,text)
         elif self.encoding_method == "from-scratch":
             encoding_out, token_splits = self.encoder(tokens)
-        if not encoding_out:
+        if encoding_out is None:
             raise ValueError("encoding did not occur check encoding_method")
-
+        print("encoding_out:", encoding_out.device)
+        print("token_splits:", token_splits.device)
         curr_batch_size = len(entity_spans)
 
         # gets the hidden vector for each entity and stores them in H
@@ -299,6 +301,7 @@ class INNModelLightning(pl.LightningModule):
         hidden_state_clamp_val,
     ):
         super().__init__()
+        print("MODEL:",self.device)
         self.encoding_method = encoding_method
         if self.encoding_method == "bert":
             encoding_dim = hidden_dim_bert
@@ -311,7 +314,6 @@ class INNModelLightning(pl.LightningModule):
             hidden_state_clamp_val=hidden_state_clamp_val,
             cell_state_clamp_val=cell_state_clamp_val,
         )
-
         self.inn = INNModel(
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
@@ -323,6 +325,7 @@ class INNModelLightning(pl.LightningModule):
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
         )
+        print("INN:", self.inn.device)
         # loss criterion
         self.criterion = nn.NLLLoss()
 
