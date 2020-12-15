@@ -112,14 +112,20 @@ class INNModel(pl.LightningModule):
         ]
 
         # gets the hidden vector for each entity and stores them in H
-        H = torch.randn(T.shape[0], self.word_embedding_dim * 2).detach().to(self.device)
+        H = (
+            torch.randn(T.shape[0], self.word_embedding_dim * 2)
+            .detach()
+            .to(self.device)
+        )
         H = self.get_h_entities(
             entity_spans, blstm_out, token_splits, H, curr_batch_size, is_entity
         )
-        # H.requires_grad_()
 
-        C = torch.zeros(T.shape[0], self.word_embedding_dim * 2).detach().to(self.device)
-        # .to(self.device)
+        C = (
+            torch.zeros(T.shape[0], self.word_embedding_dim * 2)
+            .detach()
+            .to(self.device)
+        )
 
         predictions = [
             PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
@@ -186,7 +192,9 @@ class INNModelLightning(pl.LightningModule):
         )
         opt = self.optimizers()
         raw_predictions = self.inn(*self.expand_batch(batch_sample))
-        self.log('train_acc_step', self.accuracy(raw_predictions, batch_sample["labels"]))
+        self.log(
+            "train_acc_step", self.accuracy(raw_predictions, batch_sample["labels"])
+        )
         predictions = torch.log(raw_predictions)
         loss = self.criterion(predictions, batch_sample["labels"])
         predicted_pos = torch.sum(raw_predictions[:, 1] > 0.5)

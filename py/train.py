@@ -83,9 +83,6 @@ def load_dataset():
 
 def split_data(dataset):
     train_max_range = round(0.8 * len(dataset))
-    # train_max_range = 20
-    train_max_range = train_max_range - (train_max_range % BATCH_SIZE)
-    assert(train_max_range % BATCH_SIZE == 0)
     train_idx = range(0, train_max_range)
     val_idx = range(train_max_range, len(dataset))
     train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
@@ -100,9 +97,15 @@ if __name__ == "__main__":
     torch.autograd.set_detect_anomaly(True)
 
     train_data_loader = DataLoader(
-        train_set, collate_fn=collate_func, batch_size=BATCH_SIZE, drop_last=True, shuffle=False,
+        train_set,
+        collate_fn=collate_func,
+        batch_size=BATCH_SIZE,
+        drop_last=True,
+        shuffle=False,
     )
-    val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1, shuffle=False)
+    val_data_loader = DataLoader(
+        val_set, collate_fn=collate_func, batch_size=1, shuffle=False
+    )
 
     run_name = "test"
 
@@ -134,7 +137,7 @@ if __name__ == "__main__":
     )
     wandb_logger.watch(model, log="gradients", log_freq=1)
 
-    checkpoint_callback = ModelCheckpoint(dirpath=wandb.run.dir, save_top_k=-1)
+    # checkpoint_callback = ModelCheckpoint(dirpath=wandb.run.dir, save_top_k=-1)
 
     trainer = pl.Trainer(
         gpus=GPUS,

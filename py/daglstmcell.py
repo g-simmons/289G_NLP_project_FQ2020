@@ -47,13 +47,17 @@ class DAGLSTMCell(pl.LightningModule):
         n_argsets = hidden_vectors.shape[0]
 
         if not n_argsets == n_entities:
-            raise ValueError("shape[0] for hidden_vectors and cell_states should be twice shape[0] for element embeddings and S")
+            raise ValueError(
+                "shape[0] for hidden_vectors and cell_states should be twice shape[0] for element embeddings and S"
+            )
 
         if not S.shape[1] == 2:
             raise ValueError("S.shape[1] should be 2")
 
         if not hidden_vectors.shape[1] == cell_states.shape[1] == self.hidden_dim * 2:
-            raise ValueError(f"hidden_vectors, cell_states should have shape[1] == self.hidden_dim, but have shapes {hidden_vectors.shape}, {cell_states.shape}")
+            raise ValueError(
+                f"hidden_vectors, cell_states should have shape[1] == self.hidden_dim, but have shapes {hidden_vectors.shape}, {cell_states.shape}"
+            )
 
         return hidden_vectors, cell_states, element_embeddings, S, n_entities, n_argsets
 
@@ -64,7 +68,14 @@ class DAGLSTMCell(pl.LightningModule):
         assert fj.shape[1] == self.hidden_dim
 
     def forward(self, hidden_vectors, cell_states, element_embeddings, S):
-        hidden_vectors, cell_states, element_embeddings, S, n_entities, n_argsets = self._validate_inputs(hidden_vectors, cell_states, element_embeddings, S)
+        (
+            hidden_vectors,
+            cell_states,
+            element_embeddings,
+            S,
+            n_entities,
+            n_argsets,
+        ) = self._validate_inputs(hidden_vectors, cell_states, element_embeddings, S)
         v = hidden_vectors
 
         ioc_hat = self.W_ioc_hat(element_embeddings)
@@ -79,7 +90,10 @@ class DAGLSTMCell(pl.LightningModule):
         cell_states = cell_states
         fcj = torch.mul(f, cell_states)
 
-        fj_mul_css = torch.sum(torch.stack([fcj_x for fcj_x in torch.split(fcj, self.hidden_dim, dim=1)]),dim=0)
+        fj_mul_css = torch.sum(
+            torch.stack([fcj_x for fcj_x in torch.split(fcj, self.hidden_dim, dim=1)]),
+            dim=0,
+        )
 
         c = torch.mul(i, c_hat) + fj_mul_css
 

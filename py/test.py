@@ -18,7 +18,7 @@ class TestDAGLSTM:
             cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         )
 
-        H = torch.randn(10 * MAX_INPUTS, HIDDEN_DIM).reshape(10,-1)
+        H = torch.randn(10 * MAX_INPUTS, HIDDEN_DIM).reshape(10, -1)
         C = torch.zeros_like(H)
         S = torch.arange(0, 10 * MAX_INPUTS).reshape(10, MAX_INPUTS)
         E = torch.randn(10, HIDDEN_DIM)
