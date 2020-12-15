@@ -300,7 +300,7 @@ class INNModelLightning(pl.LightningModule):
         metrics["predicted_pos"] = torch.sum(predicted_labels)
         metrics["batch_size"] = batch_size
 
-        return {f'{prefix}_{k}': torch.tensor(v).float() for k, v in metrics.items()}
+        return {f'{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
 
     def _calculate_step_metrics_and_loss(self,predicted_probs,batch_sample,prefix):
         batch_size = len(batch_sample["entity_spans"])
@@ -313,7 +313,7 @@ class INNModelLightning(pl.LightningModule):
         naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,batch_sample,batch_size,prefix=f"naive_{prefix}")
 
         loss = self.criterion(log_predicted_probs, batch_sample["labels"])
-        metrics["train_loss"] = loss
+        metrics["train_loss"] = loss.cpu()
 
         return loss, metrics, naive_metrics
 
