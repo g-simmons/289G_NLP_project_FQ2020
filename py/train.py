@@ -7,7 +7,9 @@ import sys
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from torch.utils.data import DataLoader, random_split
+import wandb
 
 sys.path.append("../py")
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
@@ -18,9 +20,9 @@ from INN import INNModelLightning
 
 
 def update_batch_S(new_batch, batch):
-    S = batch[0]["S"]
+    S = batch[0]["S"].clone()
     for i in range(1, len(batch)):
-        s_new = batch[i]["S"]
+        s_new = batch[i]["S"].clone()
         s_new[s_new > -1] += batch[i - 1]["T"].shape[0]
         S = torch.cat([S, s_new])
     new_batch["S"] = S
@@ -81,6 +83,7 @@ def load_dataset():
 
 def split_data(dataset):
     train_max_range = round(0.8 * len(dataset))
+    # train_max_range = 20
     train_max_range = train_max_range - (train_max_range % BATCH_SIZE)
     assert(train_max_range % BATCH_SIZE == 0)
     train_idx = range(0, train_max_range)
@@ -100,6 +103,8 @@ if __name__ == "__main__":
         train_set, collate_fn=collate_func, batch_size=BATCH_SIZE, drop_last=True, shuffle=False,
     )
     val_data_loader = DataLoader(val_set, collate_fn=collate_func, batch_size=1, shuffle=False)
+
+    run_name = "test"
 
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
@@ -121,13 +126,15 @@ if __name__ == "__main__":
     }
 
     wandb_logger = WandbLogger(
-        name="test",
+        name=run_name,
         project="nested-relation-extraction",
         entity="ner",
         config=wandb_config,
         log_model=True,
     )
     wandb_logger.watch(model, log="gradients", log_freq=1)
+
+    checkpoint_callback = ModelCheckpoint(dirpath=wandb.run.dir, save_top_k=-1)
 
     trainer = pl.Trainer(
         gpus=GPUS,
@@ -137,6 +144,7 @@ if __name__ == "__main__":
         max_epochs=3,
         val_check_interval=0.25,
         logger=wandb_logger,
+        # checkpoint_callback=checkpoint_callback, # save the model after each epoch
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)
