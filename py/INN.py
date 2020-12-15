@@ -9,8 +9,44 @@ from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
 
-# class FromScratchEncoder(pl.LightningModule):
+class FromScratchEncoder(pl.LightningModule):
+    def __init__(self,vocab_dict,word_embedding_dim):
+        super().__init__()
+        self.word_embedding_dim = word_embedding_dim
+        self.vocab_dict = vocab_dict
+        self.word_embeddings = nn.Embedding(len(self.vocab_dict), self.word_embedding_dim)
+        self.blstm = nn.LSTM(
+            input_size=self.word_embedding_dim,
+            hidden_size=self.word_embedding_dim,
+            bidirectional=True,
+            num_layers=1,
+        )
+    def forward(self,tokens,_):
+        wemb = self.word_embeddings(torch.cat(tokens))
+        token_splits = [len(t) for t in tokens]
+        embedded_tokens = torch.split(wemb, token_splits)
+        blstm_out = [
+            self.blstm(et.unsqueeze(0))[0].squeeze(0) for et in embedded_tokens
+        ]
+        return blstm_out, token_splits
 
+class BERTEncoder(pl.LightningModule):
+    def __init__(self, output_bert_hidden_states):
+        super().__init__()
+        self.bert_config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
+        self.output_bert_hidden_states = output_bert_hidden_states
+        if self.output_bert_hidden_states:
+            self.bert_config.output_hidden_states = output_bert_hidden_states
+        self.bert = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', config=self.bert_config)
+
+    def forward(self,tokens,mask):
+        tokens = tokens.squeeze(0)
+        mask = mask.squeeze(0)
+
+        out = self.Bert(tokens,attention_mask=mask)
+        bert_out = out[0]
+        bert_out = bert_out.permute(1,0,2)
+        return bert_out
 
 class INNModel(pl.LightningModule):
     """INN model configuration.
@@ -45,42 +81,23 @@ class INNModel(pl.LightningModule):
         self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
-            self.bert_config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
-            if self.output_bert_hidden_states:
-                self.bert_config.output_hidden_states = output_bert_hidden_states
-            self.bert = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', config=self.bert_config)
+            self.encoder = BERTEncoder(self.output_bert_hidden_states)
+            linear_in_dim = self.hidden_dim_bert
         else:
-            self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
-            self.blstm = nn.LSTM(
-                input_size=self.word_embedding_dim,
-                hidden_size=self.word_embedding_dim,
-                bidirectional=True,
-                num_layers=1,
-            )
+            self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
+            linear_in_dim = 2 * self.word_embedding_dim
 
         self.element_embeddings = nn.Embedding(
             len(element_to_idx.keys()), self.relation_embedding_dim
         )
 
-        if self.encoding_method == "bert":
-            self.attn_scores = nn.Linear(in_features=self.hidden_dim_bert, out_features=1)
-        elif self.encoding_method == "from-scratch":
-            self.attn_scores = nn.Linear(in_features=2 * self.word_embedding_dim, out_features=1)
+        self.attn_scores = nn.Linear(in_features=linear_in_dim, out_features=1)
 
         self.cell = cell
 
-        if self.encoding_method == "bert":
-            self.output_linear = nn.Sequential(
-                nn.Linear(self.hidden_dim_bert, 4 * self.word_embedding_dim),
-                nn.Linear(4 * self.word_embedding_dim, 2),
-            )
-        elif self.encoding_method == "from-scratch":
-            self.output_linear = nn.Sequential(
-                nn.Linear(2 * self.word_embedding_dim, 4 * self.word_embedding_dim),
-                nn.Linear(4 * self.word_embedding_dim, 2),
-            )
-        self.attn_scores = nn.Linear(
-            in_features=self.word_embedding_dim * 2, out_features=1
+        self.output_linear = nn.Sequential(
+            nn.Linear(linear_in_dim, 4 * self.word_embedding_dim),
+            nn.Linear(4 * self.word_embedding_dim, 2),
         )
 
     def get_h_entities(
@@ -130,13 +147,9 @@ class INNModel(pl.LightningModule):
         L,
         is_entity,
     ):
-        wemb = self.word_embeddings(torch.cat(tokens))
-        token_splits = [len(t) for t in tokens]
-        embedded_tokens = torch.split(wemb, token_splits)
+
+        encoding_out, token_splits = self.encoder(tokens, mask)
         curr_batch_size = len(entity_spans)
-        blstm_out = [
-            self.blstm(et.unsqueeze(0))[0].squeeze(0) for et in embedded_tokens
-        ]
 
         # gets the hidden vector for each entity and stores them in H
         H = (
@@ -145,7 +158,7 @@ class INNModel(pl.LightningModule):
             .to(self.device)
         )
         H = self.get_h_entities(
-            entity_spans, blstm_out, token_splits, H, curr_batch_size, is_entity
+            entity_spans, encoding_out, token_splits, H, curr_batch_size, is_entity
         )
 
         C = (
