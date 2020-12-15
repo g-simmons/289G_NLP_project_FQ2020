@@ -43,7 +43,7 @@ class BERTEncoder(pl.LightningModule):
         tokens = tokens.squeeze(0)
         mask = mask.squeeze(0)
 
-        out = self.Bert(tokens,attention_mask=mask)
+        out = self.bert(tokens,attention_mask=mask)
         bert_out = out[0]
         bert_out = bert_out.permute(1,0,2)
         return bert_out
