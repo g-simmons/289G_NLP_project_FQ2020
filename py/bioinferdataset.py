@@ -1,104 +1,115 @@
-import pickle
 import sys
-
-import dgl
 import numpy as np
+import dgl
+import pickle
 
 sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
 sys.path.append("../py/")
-from collections import Counter
-from itertools import product
-from multiprocessing import Pool
-
-import pandas as pd
-import torch
-import tqdm
 from BIParser import BIParser
+from BasicClasses import RelNode
+
+import os
+import json
+
+from config import ENTITY_PREFIX, PREDICATE_PREFIX
+from collections import Counter, OrderedDict
+
+from torch.utils.data import Dataset, DataLoader
+import torch
 from torch import nn
 from torch.nn import functional as functional
-from torch.utils.data import Dataset
+
+import tqdm
+from multiprocessing import Pool
+from itertools import product
+import istarmap
+
+import pandas as pd
 from transformers import *
 
-import istarmap
-from config import *
-from config import ENTITY_PREFIX, PREDICATE_PREFIX
+from config import (
+    ENTITY_PREFIX,
+    PREDICATE_PREFIX,
+    EPOCHS,
+    WORD_EMBEDDING_DIM,
+    VECTOR_DIM,
+    HIDDEN_DIM,
+    RELATION_EMBEDDING_DIM,
+    BATCH_SIZE,
+    MAX_LAYERS,
+    MAX_ENTITY_TOKENS,
+    PREPPED_DATA_PATH,
+    EXCLUDE_SAMPLES,
+    BERT,
+)
+
+
+def process_sample(sample, inverse_schema):
+    element_names = sample["element_names"].numpy()
+    j = len(element_names)
+    element_indices = torch.arange(j)
+
+    S_temp = [
+        nn.functional.pad(e, pad=(0, 2 - len(e)), mode="constant", value=-1)
+        for e in list(element_indices.chunk(j))
+    ]
+    T_temp = element_indices.tolist()
+
+    a = 1  # TODO: only handling single sentences for now
+    A_temp = [a for _ in element_indices]
+    labels_temp = [1 for _ in element_indices]
+
+    max_layers = MAX_LAYERS
+
+    for _ in range(max_layers):
+        ttt = torch.tensor(T_temp)
+        for c in torch.combinations(ttt):  # TODO single-argument relations?
+            e_names = torch.tensor(element_names)[c]
+            key = tuple(sorted(e.item() for e in e_names))
+            if key in inverse_schema.keys():
+                for predicate in inverse_schema[key].keys():
+                    S_temp.append(c)
+                    T_temp.append(j)
+                    A_temp.append(a)
+                    element_names = np.append(element_names, predicate)
+                    L = 0  # default label is false
+                    for i, g in enumerate(sample["relation_graphs"]):
+                        for n in g.nodes():
+                            child_idx = get_child_indices(g, node_idx=n)
+                            child_idx = torch.tensor(
+                                [
+                                    sample["node_idx_to_element_idxs"][i][idx]
+                                    for idx in child_idx
+                                ]
+                            )
+                            if child_idx.shape == c.shape:
+                                # TODO ordering
+                                if (
+                                    child_idx.tolist() == c.tolist()
+                                    and element_names[j] == g.ndata["element_names"][n]
+                                ):  # check if children match and the predicate type is correct
+                                    sample["node_idx_to_element_idxs"][i][n.item()] = j
+                                    L = 1  # this label is true because we found this candidate in the gold standard relation graphs
+                    labels_temp.append(L)
+                    j += 1
+
+    sample["labels"] = torch.tensor(labels_temp, dtype=torch.long)
+    sample["A"] = torch.tensor(A_temp)
+    sample["T"] = torch.tensor(T_temp)
+    sample["S"] = torch.stack(S_temp)
+    sample["element_names"] = torch.tensor(element_names)
+
+    # only need tokens, entity_spans, element_names, A, T, S, labels
+    del sample["relation_graphs"]
+    del sample["node_idx_to_element_idxs"]
+    #del sample["text"]
+    del sample["element_locs"]
+
+    return sample
 
 
 def get_child_indices(g, node_idx):
     return torch.stack(g.out_edges(node_idx))[1].tolist()
-
-
-def sort_args(arguments):
-    return tuple(sorted(arguments))
-
-
-def process_sample(sample, inverse_schema):
-    """
-    process a single sample.
-    """
-    element_names = sample["element_names"].flatten().tolist()
-    num_true_elements = len(element_names)
-    T_temp = torch.arange(num_true_elements)
-
-    S_temp = [
-        nn.functional.pad(e, pad=(0, 2 - len(e)), mode="constant", value=-1)
-        for e in list(T_temp.chunk(num_true_elements))
-    ]
-
-    labels_temp = [1 for _ in T_temp]
-    layers_temp = [0 for _ in T_temp]
-    is_entity_temp = [1 for _ in T_temp]
-
-    max_layers = MAX_LAYERS
-
-    for layer in range(max_layers):
-        for arg_indices in torch.combinations(T_temp):
-            arguments = [element_names[idx] for idx in arg_indices.tolist()]
-            key = sort_args(arguments)
-            if key in inverse_schema.keys():
-                for predicate in inverse_schema[key].keys():
-                    S_temp.append(arg_indices)
-                    is_entity_temp.append(0)
-                    element_names.append(predicate)
-                    layers_temp.append(layer + 1)
-                    L = 0  # default label is false
-                    for i, graph in enumerate(sample["relation_graphs"]):
-                        for n in graph.nodes():
-                            n_predicate = graph.ndata["element_names"][n]
-                            child_indices = torch.tensor(
-                                [
-                                    sample["node_idx_to_element_idxs"][i][idx]
-                                    for idx in get_child_indices(graph, node_idx=n)
-                                ]
-                            )
-                            if child_indices.shape == arg_indices.shape:
-                                # TODO ordering
-                                if (
-                                    child_indices.tolist() == arg_indices.tolist()
-                                    and predicate == n_predicate
-                                ):  # check if children match and the predicate type is correct
-                                    sample["node_idx_to_element_idxs"][i][
-                                        n.item()
-                                    ] = num_true_elements
-                                    L = 1  # this label is true because we found this candidate in the gold standard relation graphs
-                    labels_temp.append(L)
-                    num_true_elements += 1
-                    T_temp = torch.arange(len(is_entity_temp))
-
-    sample["labels"] = torch.tensor(labels_temp, dtype=torch.long)
-    sample["T"] = T_temp = torch.arange(len(is_entity_temp))
-    sample["S"] = torch.stack(S_temp)
-    sample["element_names"] = torch.tensor(element_names)
-    sample["L"] = torch.tensor(layers_temp)
-    sample["is_entity"] = torch.tensor(is_entity_temp)
-
-    # only need certain elements from data
-    del sample["relation_graphs"]
-    del sample["node_idx_to_element_idxs"]
-    del sample["text"]
-    del sample["element_locs"]
-
-    return sample
 
 
 class BioInferDataset(Dataset):
@@ -118,9 +129,8 @@ class BioInferDataset(Dataset):
         self.element_to_idx = {elements[i]: i for i in range(len(elements))}
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            "allenai/scibert_scivocab_uncased"
-        )
+        #Bert Tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased') 
 
     def __len__(self):
         return len(self.sample_list)
@@ -136,29 +146,25 @@ class BioInferDataset(Dataset):
     def samples_to_pickle(self, pickle_file=PREPPED_DATA_PATH):
         pickle.dump(self.sample_list, open(pickle_file, "wb"))
 
-    def pre_prep_data(self):
-        print("pre-prepping data...")
-        self.sample_list = tqdm.tqdm(
+    def prep_data(self):
+        """
+        prepares the each data sample using process_sample()
+        stores the result in sample_list
+        """
+        print("prepping data...")
+        sample_list = tqdm.tqdm(
             [
                 self.process_sentence(sent, self.inverse_schema)
                 for i, sent in enumerate(self.parser.bioinfer.sentences.sentences)
                 if i not in EXCLUDE_SAMPLES
             ]
         )
-
-    def prep_data(self):
-        """
-        prepares the each data sample using process_sample()
-        stores the result in sample_list
-        """
-        if not len(self.sample_list):
-            self.pre_prep_data()
         print("processing data...")
         with Pool() as p:
             self.sample_list = list(
                 tqdm.tqdm(
                     p.istarmap(
-                        process_sample, product(self.sample_list, [self.inverse_schema])
+                        process_sample, product(sample_list, [self.inverse_schema])
                     )
                 )
             )
@@ -177,38 +183,46 @@ class BioInferDataset(Dataset):
             node_idx_to_element_idxs,
         ) = self.get_relation_graphs_from_sentence(sentence, entity_locs)
 
-        input_ids, attention_mask = self.bert_tokens(sentence.getText())
-
-        sample = {
+        if BERT:
+            input_ids,attention_mask = self.Bert_Tokens(sentence.getText())
+            sample = {
             "text": sentence.getText(),
-            "from_scratch_tokens": self.sent_to_idxs(
-                sentence.getText(), self.vocab_dict
-            ),
-            "bert_tokens": input_ids,
+            "tokens": input_ids,
             "mask": attention_mask,
             "element_names": entity_names,
             "element_locs": entity_locs,
             "entity_spans": entity_spans,
             "relation_graphs": graphs,
             "node_idx_to_element_idxs": node_idx_to_element_idxs,
-        }
-
+            }
+        else:
+            sample = {
+                "text": sentence.getText(),
+                "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+                "element_names": entity_names,
+                "element_locs": entity_locs,
+                "entity_spans": entity_spans,
+                "relation_graphs": graphs,
+                "node_idx_to_element_idxs": node_idx_to_element_idxs,
+            }
         return sample
 
-    def bert_tokens(self, sentence):
+
+    def Bert_Tokens(self, sentence):
         tokenized = self.tokenizer.encode_plus(
-            text=sentence,  # the sentence to be encoded
-            add_special_tokens=True,  # Add [CLS] and [SEP]
-            max_length=147,  # maximum length of a sentence
-            pad_to_max_length=True,  # Add [PAD]s
-            truncation=True,
-            #     padding=True,
-            return_attention_mask=True,  # Generate the attention mask
-            #     return_tensors = 'pt',  # ask the function to return PyTorch tensors
-        )
-        input_ids = torch.LongTensor([np.array(tokenized["input_ids"])])
-        attention_mask = torch.LongTensor([np.array(tokenized["attention_mask"])])
-        return input_ids, attention_mask
+                            text=sentence,  # the sentence to be encoded
+                            add_special_tokens=True,  # Add [CLS] and [SEP]
+                            max_length = 147,  # maximum length of a sentence
+                            pad_to_max_length=True,  # Add [PAD]s
+                            truncation = True,
+                        #     padding=True,
+                            return_attention_mask = True,  # Generate the attention mask
+                        #     return_tensors = 'pt',  # ask the function to return PyTorch tensors
+                        )
+        input_ids = torch.LongTensor([np.array(tokenized['input_ids'])])
+        attention_mask = torch.LongTensor([np.array(tokenized['attention_mask'])])
+        return input_ids,attention_mask
+
 
     def create_vocab_dictionary(self, parser):
         vocab = set()

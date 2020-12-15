@@ -1,69 +1,32 @@
-import pytorch_lightning as pl
-from pytorch_lightning import metrics
 import torch
 from torch import nn
 from torch.nn import functional as functional
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-from transformers import *
+from torch.utils.tensorboard import SummaryWriter
 
-from config import *
-from constants import *
 from daglstmcell import DAGLSTMCell
 
+from transformers import *
+import sys
 
-class FromScratchEncoder(pl.LightningModule):
-    def __init__(self, vocab_dict, word_embedding_dim):
-        super().__init__()
-        self.word_embedding_dim = word_embedding_dim
-        self.vocab_dict = vocab_dict
-        self.word_embeddings = nn.Embedding(
-            len(self.vocab_dict), self.word_embedding_dim
-        )
-        self.blstm = nn.LSTM(
-            input_size=self.word_embedding_dim,
-            hidden_size=self.word_embedding_dim,
-            bidirectional=True,
-            num_layers=1,
-        )
-
-    def forward(self, tokens):
-        wemb = self.word_embeddings(torch.cat(tokens))
-        token_splits = [len(t) for t in tokens]
-        embedded_tokens = torch.split(wemb, token_splits)
-        blstm_out = [
-            self.blstm(et.unsqueeze(0))[0].squeeze(0) for et in embedded_tokens
-        ]
-        return blstm_out, token_splits
-
-
-class BERTEncoder(pl.LightningModule):
-    def __init__(self, output_bert_hidden_states):
-        super().__init__()
-        print('loading pretrained BERT...')
-        self.bert_config = AutoConfig.from_pretrained(
-            "allenai/scibert_scivocab_uncased"
-        )
-        self.output_bert_hidden_states = output_bert_hidden_states
-        if self.output_bert_hidden_states:
-            self.bert_config.output_hidden_states = output_bert_hidden_states
-        self.bert = AutoModel.from_pretrained(
-            "allenai/scibert_scivocab_uncased", config=self.bert_config
-        )
-
-    def forward(self, bert_tokens, masks):
-        tokens = bert_tokens
-
-        bert_outs = []
-        for toks, mask in zip(tokens, masks):
-            bert_out = self.bert(toks, attention_mask=mask)[0]
-            bert_out = bert_out.permute(1, 0, 2)
-            bert_outs.append(bert_out)
-
-        token_splits = [
-            len(t) for t in bert_outs
-        ]  # should be tokens or bert_tokens? check len matches later on
-
-        return bert_outs, token_splits
+from config import (
+    ENTITY_PREFIX,
+    PREDICATE_PREFIX,
+    EPOCHS,
+    WORD_EMBEDDING_DIM,
+    VECTOR_DIM,
+    HIDDEN_DIM,
+    RELATION_EMBEDDING_DIM,
+    BATCH_SIZE,
+    MAX_LAYERS,
+    MAX_ENTITY_TOKENS,
+    CELL_STATE_CLAMP_VAL,
+    HIDDEN_STATE_CLAMP_VAL,
+    HIDDEN_DIM_BERT,
+    BERT,
+    LEARNING_RATE
+)
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+import pytorch_lightning as pl
 
 
 class INNModel(pl.LightningModule):
@@ -72,6 +35,7 @@ class INNModel(pl.LightningModule):
     Parameters:
         vocab_dict (dict): The vocabulary for training, tokens to indices.
         word_embedding_dim (int): The size of the word embedding vectors.
+        relation_embedding_dim (int): The size of the relation embedding vectors.
         hidden_dim (int): The size of LSTM hidden vector (effectively 1/2 of the desired BiLSTM output size).
         schema: The task schema
         element_to_idx (dict): dictionary mapping entity strings to unique integer values
@@ -81,137 +45,272 @@ class INNModel(pl.LightningModule):
         self,
         vocab_dict,
         element_to_idx,
-        encoding_method,
-        output_bert_hidden_states,
         word_embedding_dim,
-        hidden_dim_bert,
+        relation_embedding_dim,
+        hidden_dim,
         cell,
         cell_state_clamp_val,
         hidden_state_clamp_val,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
-        self.hidden_dim_bert = hidden_dim_bert
-        self.encoding_method = encoding_method
-        self.output_bert_hidden_states = output_bert_hidden_states
+        self.hidden_dim = hidden_dim
+        self.hidden_dim_bert = HIDDEN_DIM_BERT
+        self.relation_embedding_dim = relation_embedding_dim
 
-        if self.encoding_method == "bert":
-            self.encoder = BERTEncoder(self.output_bert_hidden_states)
-            self.linear_in_dim = self.hidden_dim_bert
-        else:
-            self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
-            self.linear_in_dim = 2 * self.word_embedding_dim
+        self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
 
         self.element_embeddings = nn.Embedding(
-            len(element_to_idx.keys()), self.linear_in_dim
+            len(element_to_idx.keys()), self.relation_embedding_dim
         )
 
-        self.attn_scores = nn.Linear(in_features=self.linear_in_dim, out_features=1)
+        self.attn_scores = nn.Linear(in_features=self.hidden_dim_bert, out_features=1)   #changed 2 * HIDDEN_DIM to HIDDEN_DIM_BERT
+
+        self.blstm = nn.LSTM(
+            input_size=self.word_embedding_dim,
+            hidden_size=self.hidden_dim,
+            bidirectional=True,
+            num_layers=1,
+        )
 
         self.cell = cell
 
         self.output_linear = nn.Sequential(
-            nn.Linear(self.linear_in_dim, 4 * self.word_embedding_dim),
-            nn.Linear(4 * self.word_embedding_dim, 2),
+            nn.Linear(self.hidden_dim_bert, 4 * self.hidden_dim),        #changed from 2 * self.hidden_dim to HIDDEN_DIM_BERT
+            nn.Linear(4 * self.hidden_dim, 2),
         )
 
-    def get_h_entities(
-        self, entity_indices, encoding_out, token_splits, H, curr_batch_size, is_entity
-    ):
+        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
+        self.config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
+        #uncomment when need to concatenate
+        #config.output_hidden_states =True
+        self.Bert = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', config=self.config)
+
+    def get_h_entities(self, entity_indices, blstm_out, H, curr_batch_size):
         """Apply attention mechanism to entity representation.
         Args:
             entities (list of tuples::(str, (int,))): A list of pairs of an
                 entity label and indices of words.
-            encoding_out (torch.Tensor): The output hidden states of encoding module.
+            blstm_out (torch.Tensor): The output hidden states of bi-LSTM.
         Returns:
             h_entities (torch.Tensor): The output hidden states of entity
                 representation layer.
         """
         H_new = torch.clone(H)
-        attn_scores = torch.split(
-            self.attn_scores(torch.cat(encoding_out)), token_splits
-        )
+        attn_scores_out = self.attn_scores(blstm_out)
 
-        h_entities = []
-        for sample in range(curr_batch_size):
-            sample_entity_indices = [idx[idx >= 0] for idx in entity_indices[sample]]
-            for idx in sample_entity_indices:
-                sample_attn_scores = attn_scores[sample][idx.long()]
-                sample_attn_weights = functional.softmax(sample_attn_scores, dim=0)
-                encoding_vecs = encoding_out[sample][idx.long()]
-                h_entity = torch.mul(sample_attn_weights, encoding_vecs).sum(axis=0)
-                h_entities.append(h_entity.squeeze())
+        for i, tok_indices in enumerate(entity_indices):
+            idx = tok_indices[tok_indices >= 0]
 
-        H_new[is_entity == 1] = torch.stack(h_entities)
+            if idx.nelement() == 0:
+                # TODO: maybe set corresponding H_new entries to 0
+                continue
+
+            attn_scores = torch.index_select(attn_scores_out, dim=0, index=idx)
+            attn_weights = functional.softmax(attn_scores, dim=0)
+
+            # for each batch entry
+            for batch_entry_num in range(curr_batch_size):
+                # gets the current batch entry's attention weights
+                curr_batch_attn_weights = attn_weights[:, batch_entry_num]
+
+                # multiplies the current batch entry's attention weights and current batch's blstm_out
+                # creates a T x D matrix where T is the number of tokens and D is blstm_out's dimension
+                h_entity = torch.matmul(
+                    curr_batch_attn_weights, blstm_out[i, batch_entry_num].unsqueeze(0)
+                )
+
+                # creates a vector of length D (512) or (768 for bert) and stores it in H_new
+                h_entity = h_entity.sum(axis=0)
+                H_new[i, batch_entry_num] = h_entity
 
         return H_new
 
-    def _get_parent_mask(self, L, layer, element_names, is_entity):
-        mask = L == layer
-        mask = torch.logical_and(mask, element_names > -1)
-        mask = torch.logical_and(mask, torch.logical_not(is_entity))
-        return mask
+    def _get_argsets_from_candidates(self, candidates):
+        argsets = set()
+        for argset_idx in candidates.get_combinations(r=2):
+            key = tuple(sorted([self.idx_to_element[a[1].item()] for a in argset_idx]))
+            if key in self.inverted_schema.keys():
+                argset = tuple((c, candidates[c]) for c in argset_idx)
+                argsets.add(argset)
+        return argsets
+
+    def _generate_to_predict(self, argsets):
+        to_predict = []
+        for argset in argsets:
+            key = tuple(
+                sorted([self.idx_to_element[arg[0][1].item()] for arg in argset])
+            )
+            if len(key) > 1:
+                rels = self.inverted_schema[key]
+                for rel in rels.keys():
+                    prediction_candidate = PredictionCandidate(
+                        rel,
+                        self.element_embeddings(torch.tensor(self.element_to_idx[rel])),
+                        tuple([arg[0][1] for arg in argset]),
+                        [arg[1] for arg in argset],
+                    )
+                    to_predict.append(prediction_candidate)
+        return to_predict
+
+    def parse_bert(self, seq_original, seq_bert):
+        """
+        """
+
+        def remove_leading_pounds(token):
+            """
+            """
+            token_new = ''
+            for c in token:
+                if c != '#':
+                    token_new += c
+            return token_new
+
+        # Remove header and footer tags.
+        # seq_bert = seq_bert[1:-1]
+
+        # Iterate over the original sequence and detect splitted tokens.
+        mapped_indices_list = []
+        j = 0
+        for i in range(len(seq_original)):
+            if seq_original[i] == seq_bert[j]:  # Not splitted.
+                j += 1
+                continue
+            else:  # Detect splitted tokens.
+                start = 0
+                token_splitted = seq_original[i]
+                token_mapping = remove_leading_pounds(seq_bert[j])
+                mapped_indices = []
+                while token_mapping == \
+                        token_splitted[start : start + len(token_mapping)]:
+                    mapped_indices.append(j)
+                    start += len(token_mapping)
+                    j += 1
+                    token_mapping = remove_leading_pounds(seq_bert[j])
+                mapped_indices_list.append((i, mapped_indices))
+        return mapped_indices_list
+
+    def Bert_New_Embedding(self,bert,split,shape):
+        '''
+        '''
+        j=0
+        k=0
+        bert_new=torch.zeros([1,shape,768])
+        if len(split) != 0:
+            for i in range(len(split)):
+                while k< split[i][0]:
+                    bert_new[:,k,:]=bert[:,j,:]
+                    j += 1
+                    k += 1
+                for p in range(len(split[i][1])):
+                    j += 1
+
+                bert_new[:,k,:] = torch.sum(bert[:,split[i][1],:],dim = 1)/len(split[i][1])
+                k +=1
+            while k < shape:
+                bert_new[:,k,:]=bert[:,j,:]
+                j += 1
+                k += 1
+        else:
+            bert_new = bert
+            
+        return bert_new
 
     def forward(
-        self,
-        tokens,
-        bert_tokens,
-        mask,
-        entity_spans,
-        element_names,
-        T,
-        S,
-        L,
-        is_entity,
+        self, tokens, mask, text, entity_spans, element_names, T, S, entity_spans_size, tokens_size
     ):
-        encoding_out = None
-        if self.encoding_method == "bert":
-            encoding_out, token_splits = self.encoder(bert_tokens, mask)
-        elif self.encoding_method == "from-scratch":
-            encoding_out, token_splits = self.encoder(tokens)
-        if not encoding_out:
-            raise ValueError("encoding did not occur check encoding_method")
+        curr_batch_size = entity_spans.shape[1]
+        '''
+        # gets the embedding for each token
+        embedded_sentence = self.word_embeddings(tokens)
+        # to make computation faster, gets rid of padding by packing the batch tensor
+        # only RNN can use packed tensors
+        embedded_sentence = pack_padded_sequence(embedded_sentence, tokens_size)
+        blstm_out, _ = self.blstm(embedded_sentence)
+        # unpacks the output tensor (re-adds the padding) so that other functions can use it
+        blstm_out, _ = pad_packed_sequence(blstm_out)
+        '''
+        #taking the last layer of bert and switching batch size and sequence lenght to make dimensions similar to blstm output
+        tokens = tokens.squeeze(0)
+        mask = mask.squeeze(0)
 
-        curr_batch_size = len(entity_spans)
+        a = torch.sum(mask)
+        seq_original = [w.lower() for w in text.split(' ')]
+        seq_bert = self.tokenizer.tokenize(text)
+        splits = self.parse_bert(seq_original, seq_bert)
 
+
+        out = self.Bert(tokens,attention_mask=mask) 
+        bert_out = out[0]
+        bert_out = bert_out[:,0:a,:]
+        bert_out = bert_out[:,1:-1,:]
+
+        bert_out = self.Bert_New_Embedding(bert_out,splits,len(seq_original))
+
+        bert_out = bert_out.permute(1,0,2)
         # gets the hidden vector for each entity and stores them in H
-        H = (
-            torch.randn(T.shape[0], self.linear_in_dim)
-            .detach()
-            .to(self.device)
-        )
-        H = self.get_h_entities(
-            entity_spans, encoding_out, token_splits, H, curr_batch_size, is_entity
-        )
+        H = torch.randn(T.shape[0], curr_batch_size, self.word_embedding_dim).detach().to(self.device)       #changed 2 * HIDDEN_DIM to word_embedding_dim
+        H = self.get_h_entities(entity_spans, bert_out, H, curr_batch_size)
+        predictions = []
 
-        C = (
-            torch.zeros(T.shape[0], self.linear_in_dim)
-            .detach()
-            .to(self.device)
-        )
+        # for each batch entry
+        for batch_entry_num in range(curr_batch_size):
+            predictions_row = []
+            # for each entity span for the current batch entry
+            for _ in range(entity_spans_size[batch_entry_num]):
+                # add a "prediction" that's basically certain it's right
+                predictions_row.append(torch.tensor([0.001, 0.999]).to(self.device))
+            predictions.append(predictions_row)
+        c = self.cell.init_cell_state()
 
-        predictions = [
-            PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
-        ]
-        predictions = torch.stack(predictions).to(self.device)
-        predictions.requires_grad_()
+        # for each batch entry
+        for batch_entry_num in range(curr_batch_size):
+            # iterates over the current batch entry's S, T, and element_names
+            # and generates the current batch entry's predictions
+            for argset, target_idx, element_name in zip(
+                S[:, batch_entry_num],
+                T[:, batch_entry_num],
+                element_names[:, batch_entry_num],
+            ):
 
-        for layer in torch.unique(L):
-            if layer > 0:
-                predictions = predictions.clone()
-                parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
-                element_embeddings = self.element_embeddings(element_names[parent_mask])
-                s = S[parent_mask, :]
-                v = H[s]
-                v = v.flatten(start_dim=1)
-                cell_states = C[s]
-                cell_states = cell_states.flatten(start_dim=1)
-                h, c = self.cell.forward(v, cell_states, element_embeddings, s)
-                H[parent_mask, :] = h
-                C[parent_mask, :] = c
-                logits = self.output_linear(H[parent_mask, :])
-                sm_logits = functional.softmax(logits, dim=1)
-                predictions[parent_mask, :] = sm_logits
+                if (
+                    target_idx >= entity_spans_size[batch_entry_num]
+                    and element_name > -1
+                ):
+                    args_idx = argset[argset > -1]
+                    stacked = torch.stack(predictions[batch_entry_num])
+                    if torch.all(
+                        stacked[args_idx, 1] > 0.5
+                    ):
+                        hidden_vectors = H[args_idx, batch_entry_num]
+                        cell_states = [c for _ in hidden_vectors]
+                        e = self.element_embeddings(element_name)
+                        cell_states = torch.cat(cell_states).unsqueeze(1).to(self.device)
+                        h_out, c = self.cell.forward(hidden_vectors, cell_states, e)
+                        h_out = h_out.to(self.device)
+                        c = c.to(self.device)
+                        H[target_idx, batch_entry_num] = h_out
+
+                        logits = self.output_linear(h_out)
+                        sm_logits = functional.softmax(logits, dim=0)
+
+                        predictions[batch_entry_num].append(sm_logits)
+
+                    else:
+                        predictions[batch_entry_num].append(
+                            torch.tensor([0.999, 0.001]).to(self.device)
+                        )
+                        predictions[batch_entry_num][target_idx] = torch.tensor(
+                            [0.999, 0.001]
+                        ).to(self.device)  # predict negative if all arguments have not been predicted positive
+            # concatenates the batch entry's predictions along the 0 dimension
+            predictions[batch_entry_num] = torch.stack(
+                predictions[batch_entry_num], dim=0
+            )
+
+        # concatenates all predictions along the 0 dimension; basically a list of predictions
+        # expected to have shape N x 2, where N is the number of predictions
+        predictions = torch.cat(predictions, dim=0)
 
         return predictions
 
@@ -221,144 +320,85 @@ class INNModelLightning(pl.LightningModule):
         self,
         vocab_dict,
         element_to_idx,
-        encoding_method,
-        output_bert_hidden_states,
         word_embedding_dim,
-        hidden_dim_bert,
+        relation_embedding_dim,
+        hidden_dim,
         cell_state_clamp_val,
         hidden_state_clamp_val,
     ):
         super().__init__()
-        self.encoding_method = encoding_method
-        if self.encoding_method == "bert":
-            encoding_dim = hidden_dim_bert
-        else:
-            encoding_dim = 2 * word_embedding_dim
-
         self.cell = DAGLSTMCell(
-            encoding_dim=encoding_dim,
+            hidden_dim=HIDDEN_DIM_BERT,              #changed from 2 * hidden_dim to HIDDEN_DIM_BERT
+            relation_embedding_dim=relation_embedding_dim,
             max_inputs=2,
             hidden_state_clamp_val=hidden_state_clamp_val,
             cell_state_clamp_val=cell_state_clamp_val,
         )
-
         self.inn = INNModel(
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
-            encoding_method=encoding_method,
-            output_bert_hidden_states=output_bert_hidden_states,
-            hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
+            relation_embedding_dim=relation_embedding_dim,
+            hidden_dim=hidden_dim,
             cell=self.cell,
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
         )
-        # loss criterion
         self.criterion = nn.NLLLoss()
-
-        # step metrics
-        self.accuracy = pl.metrics.Accuracy()
-        self.f1 = pl.metrics.classification.F1()
-        self.confmat = pl.metrics.classification.ConfusionMatrix(num_classes=2)
-
         self.param_names = [p[0] for p in self.inn.named_parameters()]
 
     def forward(self, batch_sample):
-        predictions = self.inn(*self.expand_batch(batch_sample))
+        predictions = self.inn(
+            batch_sample["tokens"],
+            batch_sample["mask"],
+            batch_sample["text"],
+            batch_sample["entity_spans"],
+            batch_sample["element_names"],
+            batch_sample["H"],
+            batch_sample["T"],
+            batch_sample["S"],
+            batch_sample["entity_spans_pre-padded_size"],
+            batch_sample["tokens_pre-padded_size"],
+        )
         return predictions
 
-    def convert_predictions(self,predicted_probs):
-        """ takes predicted_probs (softmax output) and returns
-        predicted_probs with logarithm applied and binary labels """
-        log_predicted_probs = torch.log(predicted_probs)
-        predicted_labels = predicted_probs[:, 1] > 0.5
-
-        return log_predicted_probs, predicted_labels
-
-    def _get_naive_predicted_probs(self,labels):
-        naive_preds = [
-            PRED_FALSE for _ in labels
-        ]
-        naive_preds = torch.stack(naive_preds).to(self.device)
-        return naive_preds
-
-    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,batch_sample,batch_size,prefix):
-
-        true_labels = batch_sample["labels"]
-
-        metrics = {}
-        metrics["acc"] = self.accuracy(predicted_probs, true_labels)
-        metrics["f1"] = self.f1(predicted_labels, true_labels)
-        confmat = self.confmat(predicted_labels, true_labels)
-        tn, fp, fn, tp = confmat.flatten().tolist()
-        metrics["confmat"] = confmat
-        metrics["true_pos"] = tp
-        metrics["false_pos"] = fp
-        metrics["false_neg"] = fn
-        metrics["true_neg"] = tn
-        metrics["num_candidates"] = len(batch_sample["labels"])
-        metrics["predicted_pos"] = torch.sum(predicted_labels)
-        metrics["batch_size"] = batch_size
-
-        return {f'{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
-
-    def _calculate_step_metrics_and_loss(self,predicted_probs,batch_sample,prefix):
-        batch_size = len(batch_sample["entity_spans"])
-        naive_predicted_probs = self._get_naive_predicted_probs(batch_sample['labels'])
-
-        log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
-        log_naive_predicted_probs, naive_predicted_labels = self.convert_predictions(naive_predicted_probs)
-
-        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,predicted_labels,batch_sample,batch_size,prefix=prefix)
-        naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,batch_sample,batch_size,prefix=f"naive_{prefix}")
-
-        loss = self.criterion(log_predicted_probs, batch_sample["labels"])
-        metrics["train_loss"] = loss.cpu()
-
-        return loss, metrics, naive_metrics
-
-
     def training_step(self, batch_sample, batch_idx):
-        predicted_probs = self.inn(*self.expand_batch(batch_sample))
-
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='train')
-        self.logger.experiment.log(metrics)
-        self.logger.experiment.log(naive_metrics)
-
         opt = self.optimizers()
-        if metrics["train_predicted_pos"] > len(batch_sample["entity_spans"]):
-            self.manual_backward(loss, opt)
-            opt.step()
-
-    def expand_batch(self, batch_sample):
-        return (
-            batch_sample["from_scratch_tokens"],
-            batch_sample["bert_tokens"],
+        raw_predictions = self.inn(
+            batch_sample["tokens"],
             batch_sample["mask"],
+            batch_sample["text"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
             batch_sample["T"],
             batch_sample["S"],
-            batch_sample["L"],
-            batch_sample["is_entity"],
+            batch_sample["entity_spans_pre-padded_size"],
+            batch_sample["tokens_pre-padded_size"],
         )
+        predictions = torch.log(raw_predictions)
+        loss = self.criterion(predictions, batch_sample["labels"])
+        if len(predictions) > len(batch_sample["entity_spans"]):
+            self.manual_backward(loss, opt)
+            opt.step()
+            # self.manual_optimizer_step(opt)
+            self.logger.experiment.log({"loss": loss})
 
     def validation_step(self, batch_sample, batch_idx):
-        predicted_probs = self.inn(*self.expand_batch(batch_sample))
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='val')
-        return metrics, naive_metrics
-
-    def validation_epoch_end(self, val_step_outputs):
-        metrics = [o[0] for o in val_step_outputs]
-        naive_metrics = [o[1] for o in val_step_outputs]
-
-        def log_averages(m):
-            for metric in m[0].keys():
-                avg_val = torch.stack([x[metric] for x in m]).mean()
-                self.logger.experiment.log({metric: avg_val},commit=False)
-
-        log_averages(metrics)
-        log_averages(naive_metrics)
+        raw_predictions = self.inn(
+            batch_sample["tokens"],
+            batch_sample["mask"],
+            batch_sample["text"],
+            batch_sample["entity_spans"],
+            batch_sample["element_names"],
+            batch_sample["T"],
+            batch_sample["S"],
+            batch_sample["entity_spans_pre-padded_size"],
+            batch_sample["tokens_pre-padded_size"],
+        )
+        predictions = torch.log(raw_predictions).to(self.device)
+        loss = self.criterion(predictions, batch_sample["labels"])
+        self.logger.experiment.log({"val_loss": loss})
+        return loss
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
