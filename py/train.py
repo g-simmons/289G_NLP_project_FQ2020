@@ -44,7 +44,7 @@ def collate_cat_keys(new_batch, batch, cat_keys):
 
 def collate_func(batch):
     cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
-    list_keys = ["tokens", "entity_spans"]
+    list_keys = ["from_scratch_tokens", "bert_tokens", "entity_spans","mask"]
 
     if type(batch) == dict:
         batch = [batch]
@@ -113,6 +113,7 @@ if __name__ == "__main__":
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
         element_to_idx=dataset.element_to_idx,
+        hidden_dim_bert=HIDDEN_DIM_BERT,
         output_bert_hidden_states=False,
         word_embedding_dim=WORD_EMBEDDING_DIM,
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,

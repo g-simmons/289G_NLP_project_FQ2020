@@ -42,6 +42,7 @@ class INNModel(pl.LightningModule):
         self.hidden_dim_bert = hidden_dim_bert
         self.relation_embedding_dim = relation_embedding_dim
         self.encoding_method = encoding_method
+        self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
             self.bert_config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
@@ -120,6 +121,8 @@ class INNModel(pl.LightningModule):
     def forward(
         self,
         tokens,
+        bert_tokens,
+        mask,
         entity_spans,
         element_names,
         T,
@@ -186,7 +189,6 @@ class INNModelLightning(pl.LightningModule):
         output_bert_hidden_states,
         word_embedding_dim,
         hidden_dim_bert,
-        relation_embedding_dim,
         cell_state_clamp_val,
         hidden_state_clamp_val,
     ):
@@ -209,6 +211,7 @@ class INNModelLightning(pl.LightningModule):
             element_to_idx=element_to_idx,
             encoding_method=encoding_method,
             output_bert_hidden_states = output_bert_hidden_states,
+            hidden_dim_bert = hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             relation_embedding_dim=2 * word_embedding_dim,
             cell=self.cell,
@@ -243,7 +246,8 @@ class INNModelLightning(pl.LightningModule):
 
     def expand_batch(self, batch_sample):
         return (
-            batch_sample["tokens"],
+            batch_sample["from_scratch_tokens"],
+            batch_sample["bert_tokens"],
             batch_sample["mask"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],

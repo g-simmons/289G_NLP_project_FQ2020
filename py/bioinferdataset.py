@@ -53,7 +53,7 @@ def process_sample(sample, inverse_schema):
     for layer in range(max_layers):
         for arg_indices in torch.combinations(
             T_temp
-        ):  # TODO single-argument relations?
+        ):
             arguments = [element_names[idx] for idx in arg_indices.tolist()]
             key = sort_args(arguments)
             if key in inverse_schema.keys():
@@ -84,10 +84,10 @@ def process_sample(sample, inverse_schema):
                                     L = 1  # this label is true because we found this candidate in the gold standard relation graphs
                     labels_temp.append(L)
                     num_true_elements += 1
-                    T_temp = torch.arange(len(A_temp))
+                    T_temp = torch.arange(len(is_entity_temp))
 
     sample["labels"] = torch.tensor(labels_temp, dtype=torch.long)
-    sample["T"] = T_temp = torch.arange(len(A_temp))
+    sample["T"] = T_temp = torch.arange(len(is_entity_temp))
     sample["S"] = torch.stack(S_temp)
     sample["element_names"] = torch.tensor(element_names)
     sample["L"] = torch.tensor(layers_temp)
@@ -119,7 +119,6 @@ class BioInferDataset(Dataset):
         self.element_to_idx = {elements[i]: i for i in range(len(elements))}
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
-        #Bert Tokenizer
         self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
     def __len__(self):
@@ -177,32 +176,24 @@ class BioInferDataset(Dataset):
             node_idx_to_element_idxs,
         ) = self.get_relation_graphs_from_sentence(sentence, entity_locs)
 
-        if BERT:
-            input_ids,attention_mask = self.Bert_Tokens(sentence.getText())
-            sample = {
-            "text": sentence.getText(),
-            "tokens": input_ids,
-            "mask": attention_mask,
-            "element_names": entity_names,
-            "element_locs": entity_locs,
-            "entity_spans": entity_spans,
-            "relation_graphs": graphs,
-            "node_idx_to_element_idxs": node_idx_to_element_idxs,
-            }
-        else:
-            sample = {
+        input_ids, attention_mask = self.bert_tokens(sentence.getText())
+
+        sample = {
                 "text": sentence.getText(),
-                "tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+                "from_scratch_tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
+                "bert_tokens": input_ids,
+                "mask": attention_mask,
                 "element_names": entity_names,
                 "element_locs": entity_locs,
                 "entity_spans": entity_spans,
                 "relation_graphs": graphs,
                 "node_idx_to_element_idxs": node_idx_to_element_idxs,
             }
+
         return sample
 
 
-    def Bert_Tokens(self, sentence):
+    def bert_tokens(self, sentence):
         tokenized = self.tokenizer.encode_plus(
                             text=sentence,  # the sentence to be encoded
                             add_special_tokens=True,  # Add [CLS] and [SEP]
