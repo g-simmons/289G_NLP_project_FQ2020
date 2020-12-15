@@ -2,10 +2,67 @@ import pytorch_lightning as pl
 import torch
 from torch import nn
 from torch.nn import functional as functional
+from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
+from transformers import *
 
 from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
+
+
+class FromScratchEncoder(pl.LightningModule):
+    def __init__(self, vocab_dict, word_embedding_dim):
+        super().__init__()
+        self.word_embedding_dim = word_embedding_dim
+        self.vocab_dict = vocab_dict
+        self.word_embeddings = nn.Embedding(
+            len(self.vocab_dict), self.word_embedding_dim
+        )
+        self.blstm = nn.LSTM(
+            input_size=self.word_embedding_dim,
+            hidden_size=self.word_embedding_dim,
+            bidirectional=True,
+            num_layers=1,
+        )
+
+    def forward(self, tokens):
+        wemb = self.word_embeddings(torch.cat(tokens))
+        token_splits = [len(t) for t in tokens]
+        embedded_tokens = torch.split(wemb, token_splits)
+        blstm_out = [
+            self.blstm(et.unsqueeze(0))[0].squeeze(0) for et in embedded_tokens
+        ]
+        return blstm_out, token_splits
+
+
+class BERTEncoder(pl.LightningModule):
+    def __init__(self, output_bert_hidden_states):
+        super().__init__()
+        print('loading pretrained BERT...')
+        self.bert_config = AutoConfig.from_pretrained(
+            "allenai/scibert_scivocab_uncased"
+        )
+        self.output_bert_hidden_states = output_bert_hidden_states
+        if self.output_bert_hidden_states:
+            self.bert_config.output_hidden_states = output_bert_hidden_states
+        self.bert = AutoModel.from_pretrained(
+            "allenai/scibert_scivocab_uncased", config=self.bert_config
+        )
+
+    def forward(self, bert_tokens, masks):
+        tokens = bert_tokens
+
+        bert_outs = []
+        for toks, mask in zip(tokens, masks):
+            bert_out = self.bert(toks, attention_mask=mask)[0]
+            bert_out = bert_out.permute(1, 0, 2)
+            bert_outs.append(bert_out)
+
+        token_splits = [
+            len(t) for t in bert_outs
+        ]  # should be tokens or bert_tokens? check len matches later on
+
+        return bert_outs, token_splits
 
 
 class INNModel(pl.LightningModule):
@@ -14,7 +71,6 @@ class INNModel(pl.LightningModule):
     Parameters:
         vocab_dict (dict): The vocabulary for training, tokens to indices.
         word_embedding_dim (int): The size of the word embedding vectors.
-        relation_embedding_dim (int): The size of the relation embedding vectors.
         hidden_dim (int): The size of LSTM hidden vector (effectively 1/2 of the desired BiLSTM output size).
         schema: The task schema
         element_to_idx (dict): dictionary mapping entity strings to unique integer values
@@ -24,54 +80,56 @@ class INNModel(pl.LightningModule):
         self,
         vocab_dict,
         element_to_idx,
+        encoding_method,
+        output_bert_hidden_states,
         word_embedding_dim,
-        relation_embedding_dim,
+        hidden_dim_bert,
         cell,
         cell_state_clamp_val,
         hidden_state_clamp_val,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
-        self.relation_embedding_dim = relation_embedding_dim
+        self.hidden_dim_bert = hidden_dim_bert
+        self.encoding_method = encoding_method
+        self.output_bert_hidden_states = output_bert_hidden_states
 
-        self.word_embeddings = nn.Embedding(len(vocab_dict), self.word_embedding_dim)
+        if self.encoding_method == "bert":
+            self.encoder = BERTEncoder(self.output_bert_hidden_states)
+            self.linear_in_dim = self.hidden_dim_bert
+        else:
+            self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
+            self.linear_in_dim = 2 * self.word_embedding_dim
 
         self.element_embeddings = nn.Embedding(
-            len(element_to_idx.keys()), self.relation_embedding_dim
+            len(element_to_idx.keys()), self.linear_in_dim
         )
 
-        self.attn_scores = nn.Linear(
-            in_features=self.word_embedding_dim * 2, out_features=1
-        )
-
-        self.blstm = nn.LSTM(
-            input_size=self.word_embedding_dim,
-            hidden_size=self.word_embedding_dim,
-            bidirectional=True,
-            num_layers=1,
-        )
+        self.attn_scores = nn.Linear(in_features=self.linear_in_dim, out_features=1)
 
         self.cell = cell
 
         self.output_linear = nn.Sequential(
-            nn.Linear(2 * self.word_embedding_dim, 4 * self.word_embedding_dim),
+            nn.Linear(self.linear_in_dim, 4 * self.word_embedding_dim),
             nn.Linear(4 * self.word_embedding_dim, 2),
         )
 
     def get_h_entities(
-        self, entity_indices, blstm_out, token_splits, H, curr_batch_size, is_entity
+        self, entity_indices, encoding_out, token_splits, H, curr_batch_size, is_entity
     ):
         """Apply attention mechanism to entity representation.
         Args:
             entities (list of tuples::(str, (int,))): A list of pairs of an
                 entity label and indices of words.
-            blstm_out (torch.Tensor): The output hidden states of bi-LSTM.
+            encoding_out (torch.Tensor): The output hidden states of encoding module.
         Returns:
             h_entities (torch.Tensor): The output hidden states of entity
                 representation layer.
         """
         H_new = torch.clone(H)
-        attn_scores = torch.split(self.attn_scores(torch.cat(blstm_out)), token_splits)
+        attn_scores = torch.split(
+            self.attn_scores(torch.cat(encoding_out)), token_splits
+        )
 
         h_entities = []
         for sample in range(curr_batch_size):
@@ -79,9 +137,9 @@ class INNModel(pl.LightningModule):
             for idx in sample_entity_indices:
                 sample_attn_scores = attn_scores[sample][idx.long()]
                 sample_attn_weights = functional.softmax(sample_attn_scores, dim=0)
-                blstm_vecs = blstm_out[sample][idx.long()]
-                h_entity = torch.mul(sample_attn_weights, blstm_vecs).sum(axis=0)
-                h_entities.append(h_entity)
+                encoding_vecs = encoding_out[sample][idx.long()]
+                h_entity = torch.mul(sample_attn_weights, encoding_vecs).sum(axis=0)
+                h_entities.append(h_entity.squeeze())
 
         H_new[is_entity == 1] = torch.stack(h_entities)
 
@@ -96,6 +154,8 @@ class INNModel(pl.LightningModule):
     def forward(
         self,
         tokens,
+        bert_tokens,
+        mask,
         entity_spans,
         element_names,
         T,
@@ -103,26 +163,28 @@ class INNModel(pl.LightningModule):
         L,
         is_entity,
     ):
-        wemb = self.word_embeddings(torch.cat(tokens))
-        token_splits = [len(t) for t in tokens]
-        embedded_tokens = torch.split(wemb, token_splits)
+        encoding_out = None
+        if self.encoding_method == "bert":
+            encoding_out, token_splits = self.encoder(bert_tokens, mask)
+        elif self.encoding_method == "from-scratch":
+            encoding_out, token_splits = self.encoder(tokens)
+        if not encoding_out:
+            raise ValueError("encoding did not occur check encoding_method")
+
         curr_batch_size = len(entity_spans)
-        blstm_out = [
-            self.blstm(et.unsqueeze(0))[0].squeeze(0) for et in embedded_tokens
-        ]
 
         # gets the hidden vector for each entity and stores them in H
         H = (
-            torch.randn(T.shape[0], self.word_embedding_dim * 2)
+            torch.randn(T.shape[0], self.linear_in_dim)
             .detach()
             .to(self.device)
         )
         H = self.get_h_entities(
-            entity_spans, blstm_out, token_splits, H, curr_batch_size, is_entity
+            entity_spans, encoding_out, token_splits, H, curr_batch_size, is_entity
         )
 
         C = (
-            torch.zeros(T.shape[0], self.word_embedding_dim * 2)
+            torch.zeros(T.shape[0], self.linear_in_dim)
             .detach()
             .to(self.device)
         )
@@ -158,22 +220,34 @@ class INNModelLightning(pl.LightningModule):
         self,
         vocab_dict,
         element_to_idx,
+        encoding_method,
+        output_bert_hidden_states,
         word_embedding_dim,
+        hidden_dim_bert,
         cell_state_clamp_val,
         hidden_state_clamp_val,
     ):
         super().__init__()
+        self.encoding_method = encoding_method
+        if self.encoding_method == "bert":
+            encoding_dim = hidden_dim_bert
+        else:
+            encoding_dim = 2 * word_embedding_dim
+
         self.cell = DAGLSTMCell(
-            blstm_out_dim=2 * word_embedding_dim,
+            encoding_dim=encoding_dim,
             max_inputs=2,
             hidden_state_clamp_val=hidden_state_clamp_val,
             cell_state_clamp_val=cell_state_clamp_val,
         )
+
         self.inn = INNModel(
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
+            encoding_method=encoding_method,
+            output_bert_hidden_states=output_bert_hidden_states,
+            hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
-            relation_embedding_dim=2 * word_embedding_dim,
             cell=self.cell,
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
@@ -206,7 +280,9 @@ class INNModelLightning(pl.LightningModule):
 
     def expand_batch(self, batch_sample):
         return (
-            batch_sample["tokens"],
+            batch_sample["from_scratch_tokens"],
+            batch_sample["bert_tokens"],
+            batch_sample["mask"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
             batch_sample["T"],

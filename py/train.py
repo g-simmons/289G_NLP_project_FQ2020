@@ -6,9 +6,10 @@ import sys
 
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader, random_split
+
 import wandb
 
 sys.path.append("../py")
@@ -43,7 +44,7 @@ def collate_cat_keys(new_batch, batch, cat_keys):
 
 def collate_func(batch):
     cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
-    list_keys = ["tokens", "entity_spans"]
+    list_keys = ["from_scratch_tokens", "bert_tokens", "entity_spans", "mask"]
 
     if type(batch) == dict:
         batch = [batch]
@@ -112,9 +113,12 @@ if __name__ == "__main__":
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
         element_to_idx=dataset.element_to_idx,
+        hidden_dim_bert=HIDDEN_DIM_BERT,
+        output_bert_hidden_states=False,
         word_embedding_dim=WORD_EMBEDDING_DIM,
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
+        encoding_method=ENCODING_METHOD,
     )
 
     wandb_config = {
@@ -124,7 +128,6 @@ if __name__ == "__main__":
         "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
         "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
-        "relation_embedding_dim": model.inn.relation_embedding_dim,
         "exclude_samples": EXCLUDE_SAMPLES,
     }
 

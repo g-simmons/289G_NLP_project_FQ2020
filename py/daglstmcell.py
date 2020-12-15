@@ -10,13 +10,13 @@ class DAGLSTMCell(pl.LightningModule):
     # original tree-lstm implementation, modified here
     def __init__(
         self,
-        blstm_out_dim: int,
+        encoding_dim: int,
         max_inputs: int,
         hidden_state_clamp_val: float,
         cell_state_clamp_val: float,
     ):
         super(DAGLSTMCell, self).__init__()
-        self.hidden_dim = blstm_out_dim
+        self.hidden_dim = encoding_dim
         self.relation_embedding_dim = self.hidden_dim
         self.max_inputs = max_inputs
         self.hidden_state_clamp_val = hidden_state_clamp_val
