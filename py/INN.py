@@ -1,4 +1,5 @@
 import pytorch_lightning as pl
+from pytorch_lightning import metrics
 import torch
 from torch import nn
 from torch.nn import functional as functional
@@ -252,31 +253,82 @@ class INNModelLightning(pl.LightningModule):
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
         )
+        # loss criterion
         self.criterion = nn.NLLLoss()
+
+        # step metrics
         self.accuracy = pl.metrics.Accuracy()
+        self.f1 = pl.metrics.classification.F1()
+        self.confmat = pl.metrics.classification.ConfusionMatrix(num_classes=2)
+
         self.param_names = [p[0] for p in self.inn.named_parameters()]
 
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
         return predictions
 
+    def convert_predictions(self,predicted_probs):
+        """ takes predicted_probs (softmax output) and returns
+        predicted_probs with logarithm applied and binary labels """
+        log_predicted_probs = torch.log(predicted_probs)
+        predicted_labels = predicted_probs[:, 1] > 0.5
+
+        return log_predicted_probs, predicted_labels
+
+    def _get_naive_predicted_probs(self,labels):
+        naive_preds = [
+            PRED_FALSE for _ in labels
+        ]
+        naive_preds = torch.stack(naive_preds).to(self.device)
+        return naive_preds
+
+    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,batch_sample,batch_size,prefix):
+
+        true_labels = batch_sample["labels"]
+
+        metrics = {}
+        metrics["acc"] = self.accuracy(predicted_probs, true_labels)
+        metrics["f1"] = self.f1(predicted_labels, true_labels)
+        confmat = self.confmat(predicted_labels, true_labels)
+        tn, fp, fn, tp = confmat.flatten().tolist()
+        metrics["confmat"] = confmat
+        metrics["true_pos"] = tp
+        metrics["false_pos"] = fp
+        metrics["false_neg"] = fn
+        metrics["true_neg"] = tn
+        metrics["num_candidates"] = len(batch_sample["labels"])
+        metrics["predicted_pos"] = torch.sum(predicted_labels)
+        metrics["batch_size"] = batch_size
+
+        return {f'{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
+
+    def _calculate_step_metrics_and_loss(self,predicted_probs,batch_sample,prefix):
+        batch_size = len(batch_sample["entity_spans"])
+        naive_predicted_probs = self._get_naive_predicted_probs(batch_sample['labels'])
+
+        log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
+        log_naive_predicted_probs, naive_predicted_labels = self.convert_predictions(naive_predicted_probs)
+
+        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,predicted_labels,batch_sample,batch_size,prefix=prefix)
+        naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,batch_sample,batch_size,prefix=f"naive_{prefix}")
+
+        loss = self.criterion(log_predicted_probs, batch_sample["labels"])
+        metrics["train_loss"] = loss.cpu()
+
+        return loss, metrics, naive_metrics
+
+
     def training_step(self, batch_sample, batch_idx):
-        self.logger.experiment.log(
-            {"curr_batch_size": len(batch_sample["entity_spans"])}
-        )
+        predicted_probs = self.inn(*self.expand_batch(batch_sample))
+
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='train')
+        self.logger.experiment.log(metrics)
+        self.logger.experiment.log(naive_metrics)
+
         opt = self.optimizers()
-        raw_predictions = self.inn(*self.expand_batch(batch_sample))
-        self.log(
-            "train_acc_step", self.accuracy(raw_predictions, batch_sample["labels"])
-        )
-        predictions = torch.log(raw_predictions)
-        loss = self.criterion(predictions, batch_sample["labels"])
-        predicted_pos = torch.sum(raw_predictions[:, 1] > 0.5)
-        self.logger.experiment.log({"predicted_pos": predicted_pos})
-        if predicted_pos > len(batch_sample["entity_spans"]):
+        if metrics["train_predicted_pos"] > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
             opt.step()
-            self.logger.experiment.log({"loss": loss})
 
     def expand_batch(self, batch_sample):
         return (
@@ -292,11 +344,21 @@ class INNModelLightning(pl.LightningModule):
         )
 
     def validation_step(self, batch_sample, batch_idx):
-        raw_predictions = self.inn(*self.expand_batch(batch_sample))
-        predictions = torch.log(raw_predictions).to(self.device)
-        loss = self.criterion(predictions, batch_sample["labels"])
-        # self.logger.experiment.log({"val_loss": loss})
-        return loss
+        predicted_probs = self.inn(*self.expand_batch(batch_sample))
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='val')
+        return metrics, naive_metrics
+
+    def validation_epoch_end(self, val_step_outputs):
+        metrics = [o[0] for o in val_step_outputs]
+        naive_metrics = [o[1] for o in val_step_outputs]
+
+        def log_averages(m):
+            for metric in m[0].keys():
+                avg_val = torch.stack([x[metric] for x in m]).mean()
+                self.logger.experiment.log({metric: avg_val},commit=False)
+
+        log_averages(metrics)
+        log_averages(naive_metrics)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
