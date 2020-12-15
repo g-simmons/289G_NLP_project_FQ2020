@@ -128,7 +128,6 @@ if __name__ == "__main__":
         "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
         "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
-        "relation_embedding_dim": model.inn.relation_embedding_dim,
         "exclude_samples": EXCLUDE_SAMPLES,
     }
 

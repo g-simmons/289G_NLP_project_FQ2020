@@ -52,15 +52,15 @@ class BERTEncoder(pl.LightningModule):
     def forward(self, bert_tokens, masks):
         tokens = bert_tokens
 
-        token_splits = [
-            len(t) for t in tokens
-        ]  # should be tokens or bert_tokens? check len matches later on
-
         bert_outs = []
         for toks, mask in zip(tokens, masks):
             bert_out = self.bert(toks, attention_mask=mask)[0]
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
+
+        token_splits = [
+            len(t) for t in bert_outs
+        ]  # should be tokens or bert_tokens? check len matches later on
 
         return bert_outs, token_splits
 
@@ -71,7 +71,6 @@ class INNModel(pl.LightningModule):
     Parameters:
         vocab_dict (dict): The vocabulary for training, tokens to indices.
         word_embedding_dim (int): The size of the word embedding vectors.
-        relation_embedding_dim (int): The size of the relation embedding vectors.
         hidden_dim (int): The size of LSTM hidden vector (effectively 1/2 of the desired BiLSTM output size).
         schema: The task schema
         element_to_idx (dict): dictionary mapping entity strings to unique integer values
@@ -84,7 +83,6 @@ class INNModel(pl.LightningModule):
         encoding_method,
         output_bert_hidden_states,
         word_embedding_dim,
-        relation_embedding_dim,
         hidden_dim_bert,
         cell,
         cell_state_clamp_val,
@@ -93,27 +91,26 @@ class INNModel(pl.LightningModule):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
         self.hidden_dim_bert = hidden_dim_bert
-        self.relation_embedding_dim = relation_embedding_dim
         self.encoding_method = encoding_method
         self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
             self.encoder = BERTEncoder(self.output_bert_hidden_states)
-            linear_in_dim = self.hidden_dim_bert
+            self.linear_in_dim = self.hidden_dim_bert
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
-            linear_in_dim = 2 * self.word_embedding_dim
+            self.linear_in_dim = 2 * self.word_embedding_dim
 
         self.element_embeddings = nn.Embedding(
-            len(element_to_idx.keys()), self.relation_embedding_dim
+            len(element_to_idx.keys()), self.linear_in_dim
         )
 
-        self.attn_scores = nn.Linear(in_features=linear_in_dim, out_features=1)
+        self.attn_scores = nn.Linear(in_features=self.linear_in_dim, out_features=1)
 
         self.cell = cell
 
         self.output_linear = nn.Sequential(
-            nn.Linear(linear_in_dim, 4 * self.word_embedding_dim),
+            nn.Linear(self.linear_in_dim, 4 * self.word_embedding_dim),
             nn.Linear(4 * self.word_embedding_dim, 2),
         )
 
@@ -142,7 +139,7 @@ class INNModel(pl.LightningModule):
                 sample_attn_weights = functional.softmax(sample_attn_scores, dim=0)
                 encoding_vecs = encoding_out[sample][idx.long()]
                 h_entity = torch.mul(sample_attn_weights, encoding_vecs).sum(axis=0)
-                h_entities.append(h_entity)
+                h_entities.append(h_entity.squeeze())
 
         H_new[is_entity == 1] = torch.stack(h_entities)
 
@@ -178,7 +175,7 @@ class INNModel(pl.LightningModule):
 
         # gets the hidden vector for each entity and stores them in H
         H = (
-            torch.randn(T.shape[0], self.word_embedding_dim * 2)
+            torch.randn(T.shape[0], self.linear_in_dim)
             .detach()
             .to(self.device)
         )
@@ -187,7 +184,7 @@ class INNModel(pl.LightningModule):
         )
 
         C = (
-            torch.zeros(T.shape[0], self.word_embedding_dim * 2)
+            torch.zeros(T.shape[0], self.linear_in_dim)
             .detach()
             .to(self.device)
         )
@@ -251,7 +248,6 @@ class INNModelLightning(pl.LightningModule):
             output_bert_hidden_states=output_bert_hidden_states,
             hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
-            relation_embedding_dim=2 * word_embedding_dim,
             cell=self.cell,
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
