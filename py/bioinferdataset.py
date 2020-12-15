@@ -27,6 +27,7 @@ from config import ENTITY_PREFIX, PREDICATE_PREFIX
 def get_child_indices(g, node_idx):
     return torch.stack(g.out_edges(node_idx))[1].tolist()
 
+
 def sort_args(arguments):
     return tuple(sorted(arguments))
 
@@ -51,9 +52,7 @@ def process_sample(sample, inverse_schema):
     max_layers = MAX_LAYERS
 
     for layer in range(max_layers):
-        for arg_indices in torch.combinations(
-            T_temp
-        ):
+        for arg_indices in torch.combinations(T_temp):
             arguments = [element_names[idx] for idx in arg_indices.tolist()]
             key = sort_args(arguments)
             if key in inverse_schema.keys():
@@ -119,7 +118,9 @@ class BioInferDataset(Dataset):
         self.element_to_idx = {elements[i]: i for i in range(len(elements))}
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
-        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
+        self.tokenizer = AutoTokenizer.from_pretrained(
+            "allenai/scibert_scivocab_uncased"
+        )
 
     def __len__(self):
         return len(self.sample_list)
@@ -179,35 +180,35 @@ class BioInferDataset(Dataset):
         input_ids, attention_mask = self.bert_tokens(sentence.getText())
 
         sample = {
-                "text": sentence.getText(),
-                "from_scratch_tokens": self.sent_to_idxs(sentence.getText(), self.vocab_dict),
-                "bert_tokens": input_ids,
-                "mask": attention_mask,
-                "element_names": entity_names,
-                "element_locs": entity_locs,
-                "entity_spans": entity_spans,
-                "relation_graphs": graphs,
-                "node_idx_to_element_idxs": node_idx_to_element_idxs,
-            }
+            "text": sentence.getText(),
+            "from_scratch_tokens": self.sent_to_idxs(
+                sentence.getText(), self.vocab_dict
+            ),
+            "bert_tokens": input_ids,
+            "mask": attention_mask,
+            "element_names": entity_names,
+            "element_locs": entity_locs,
+            "entity_spans": entity_spans,
+            "relation_graphs": graphs,
+            "node_idx_to_element_idxs": node_idx_to_element_idxs,
+        }
 
         return sample
 
-
     def bert_tokens(self, sentence):
         tokenized = self.tokenizer.encode_plus(
-                            text=sentence,  # the sentence to be encoded
-                            add_special_tokens=True,  # Add [CLS] and [SEP]
-                            max_length = 147,  # maximum length of a sentence
-                            pad_to_max_length=True,  # Add [PAD]s
-                            truncation = True,
-                        #     padding=True,
-                            return_attention_mask = True,  # Generate the attention mask
-                        #     return_tensors = 'pt',  # ask the function to return PyTorch tensors
-                        )
-        input_ids = torch.LongTensor([np.array(tokenized['input_ids'])])
-        attention_mask = torch.LongTensor([np.array(tokenized['attention_mask'])])
-        return input_ids,attention_mask
-
+            text=sentence,  # the sentence to be encoded
+            add_special_tokens=True,  # Add [CLS] and [SEP]
+            max_length=147,  # maximum length of a sentence
+            pad_to_max_length=True,  # Add [PAD]s
+            truncation=True,
+            #     padding=True,
+            return_attention_mask=True,  # Generate the attention mask
+            #     return_tensors = 'pt',  # ask the function to return PyTorch tensors
+        )
+        input_ids = torch.LongTensor([np.array(tokenized["input_ids"])])
+        attention_mask = torch.LongTensor([np.array(tokenized["attention_mask"])])
+        return input_ids, attention_mask
 
     def create_vocab_dictionary(self, parser):
         vocab = set()

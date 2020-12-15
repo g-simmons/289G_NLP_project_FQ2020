@@ -9,19 +9,23 @@ from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
 
+
 class FromScratchEncoder(pl.LightningModule):
-    def __init__(self,vocab_dict,word_embedding_dim):
+    def __init__(self, vocab_dict, word_embedding_dim):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
         self.vocab_dict = vocab_dict
-        self.word_embeddings = nn.Embedding(len(self.vocab_dict), self.word_embedding_dim)
+        self.word_embeddings = nn.Embedding(
+            len(self.vocab_dict), self.word_embedding_dim
+        )
         self.blstm = nn.LSTM(
             input_size=self.word_embedding_dim,
             hidden_size=self.word_embedding_dim,
             bidirectional=True,
             num_layers=1,
         )
-    def forward(self,tokens,_):
+
+    def forward(self, tokens):
         wemb = self.word_embeddings(torch.cat(tokens))
         token_splits = [len(t) for t in tokens]
         embedded_tokens = torch.split(wemb, token_splits)
@@ -30,23 +34,37 @@ class FromScratchEncoder(pl.LightningModule):
         ]
         return blstm_out, token_splits
 
+
 class BERTEncoder(pl.LightningModule):
     def __init__(self, output_bert_hidden_states):
         super().__init__()
-        self.bert_config = AutoConfig.from_pretrained('allenai/scibert_scivocab_uncased')
+        self.bert_config = AutoConfig.from_pretrained(
+            "allenai/scibert_scivocab_uncased"
+        )
         self.output_bert_hidden_states = output_bert_hidden_states
         if self.output_bert_hidden_states:
             self.bert_config.output_hidden_states = output_bert_hidden_states
-        self.bert = AutoModel.from_pretrained('allenai/scibert_scivocab_uncased', config=self.bert_config)
+        self.bert = AutoModel.from_pretrained(
+            "allenai/scibert_scivocab_uncased", config=self.bert_config
+        )
 
-    def forward(self,tokens,mask):
+    def forward(self, bert_tokens, mask):
+        tokens = bert_tokens
         tokens = tokens.squeeze(0)
         mask = mask.squeeze(0)
 
-        out = self.bert(tokens,attention_mask=mask)
-        bert_out = out[0]
-        bert_out = bert_out.permute(1,0,2)
-        return bert_out
+        token_splits = [
+            len(t) for t in tokens
+        ]  # should be tokens or bert_tokens? check len matches later on
+
+        bert_outs = []
+        for toks in tokens:
+            bert_out = self.bert(tokens, attention_mask=mask)[0]
+            bert_out = bert_out.permute(1, 0, 2)
+            bert_outs.append(bert_out)
+
+        return bert_outs, token_splits
+
 
 class INNModel(pl.LightningModule):
     """INN model configuration.
@@ -113,7 +131,9 @@ class INNModel(pl.LightningModule):
                 representation layer.
         """
         H_new = torch.clone(H)
-        attn_scores = torch.split(self.attn_scores(torch.cat(encoding_out)), token_splits)
+        attn_scores = torch.split(
+            self.attn_scores(torch.cat(encoding_out)), token_splits
+        )
 
         h_entities = []
         for sample in range(curr_batch_size):
@@ -147,8 +167,14 @@ class INNModel(pl.LightningModule):
         L,
         is_entity,
     ):
+        encoding_out = None
+        if self.encoding_method == "bert":
+            encoding_out, token_splits = self.encoder(bert_tokens, mask)
+        elif self.encoding_method == "from-scratch":
+            encoding_out, token_splits = self.encoder(tokens)
+        if not encoding_out:
+            raise ValueError("encoding did not occur check encoding_method")
 
-        encoding_out, token_splits = self.encoder(tokens, mask)
         curr_batch_size = len(entity_spans)
 
         # gets the hidden vector for each entity and stores them in H
@@ -223,8 +249,8 @@ class INNModelLightning(pl.LightningModule):
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
             encoding_method=encoding_method,
-            output_bert_hidden_states = output_bert_hidden_states,
-            hidden_dim_bert = hidden_dim_bert,
+            output_bert_hidden_states=output_bert_hidden_states,
+            hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             relation_embedding_dim=2 * word_embedding_dim,
             cell=self.cell,

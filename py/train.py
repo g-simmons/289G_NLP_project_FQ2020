@@ -44,7 +44,7 @@ def collate_cat_keys(new_batch, batch, cat_keys):
 
 def collate_func(batch):
     cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
-    list_keys = ["from_scratch_tokens", "bert_tokens", "entity_spans","mask"]
+    list_keys = ["from_scratch_tokens", "bert_tokens", "entity_spans", "mask"]
 
     if type(batch) == dict:
         batch = [batch]
@@ -118,7 +118,7 @@ if __name__ == "__main__":
         word_embedding_dim=WORD_EMBEDDING_DIM,
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
-        encoding_method=ENCODING_METHOD
+        encoding_method=ENCODING_METHOD,
     )
 
     wandb_config = {
