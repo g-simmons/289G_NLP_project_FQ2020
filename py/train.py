@@ -113,7 +113,6 @@ if __name__ == "__main__":
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
         element_to_idx=dataset.element_to_idx,
-        encoding_method="from-scratch",
         output_bert_hidden_states=False,
         word_embedding_dim=WORD_EMBEDDING_DIM,
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
