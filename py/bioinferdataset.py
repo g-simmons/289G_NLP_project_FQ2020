@@ -10,13 +10,16 @@ from collections import Counter
 from itertools import product
 from multiprocessing import Pool
 
+import pandas as pd
 import torch
 import tqdm
 from BIParser import BIParser
 from torch import nn
 from torch.nn import functional as functional
 from torch.utils.data import Dataset
+from transformers import *
 
+import istarmap
 from config import *
 from config import ENTITY_PREFIX, PREDICATE_PREFIX
 
@@ -24,22 +27,8 @@ from config import ENTITY_PREFIX, PREDICATE_PREFIX
 def get_child_indices(g, node_idx):
     return torch.stack(g.out_edges(node_idx))[1].tolist()
 
-<<<<<<< HEAD
-from itertools import product
-from multiprocessing import Pool
-
-import pandas as pd
-import tqdm
-from transformers import *
-
-import istarmap
-from config import *
-
-=======
-
 def sort_args(arguments):
     return tuple(sorted(arguments))
->>>>>>> master
 
 
 def process_sample(sample, inverse_schema):

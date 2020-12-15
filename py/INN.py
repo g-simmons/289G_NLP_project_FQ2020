@@ -9,6 +9,8 @@ from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
 
+# class FromScratchEncoder(pl.LightningModule):
+
 
 class INNModel(pl.LightningModule):
     """INN model configuration.
