@@ -368,7 +368,7 @@ class INNModelLightning(pl.LightningModule):
         naive_preds = torch.stack(naive_preds).to(self.device)
         return naive_preds
 
-    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix):
+    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix,avg_strategy):
 
         metrics = {}
         metrics["acc"] = self.accuracy(predicted_probs, true_labels)
@@ -389,16 +389,16 @@ class INNModelLightning(pl.LightningModule):
         metrics["training_candidates"] = self.training_candidates
         metrics["training_samples"] = self.training_samples
 
-        return {f'{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
+        return {f'{avg_strategy}_{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
 
-    def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix):
+    def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix,avg_strategy):
         naive_predicted_probs = self._get_naive_all_neg_predicted_probs(true_labels)
 
         log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
         log_naive_predicted_probs, naive_predicted_labels = self.convert_predictions(naive_predicted_probs)
 
-        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix=prefix)
-        naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,true_labels,batch_size,prefix=f"naive_{prefix}")
+        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix=prefix,avg_strategy=avg_strategy)
+        naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,true_labels,batch_size,prefix=f"naive_{prefix}",avg_strategy=avg_strategy)
 
         loss = self.criterion(log_predicted_probs, true_labels)
         metrics["train_loss"] = loss.cpu()
@@ -445,27 +445,48 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
         return predicted_probs, batch_sample
 
+    def log_averages(self,m):
+        for metric in m[0].keys():
+            avg_val = torch.stack([x[metric] for x in m]).mean()
+            self.logger.experiment.log({metric: avg_val},commit=False)
+
     def validation_epoch_end(self, val_step_outputs):
+        metrics = []
+        naive_metrics = []
+        for batch_probs, batch_labels in val_step_outputs:
+            loss, batch_metrics, batch_naive_metrics = self._calculate_step_metrics_and_loss(batch_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val',avg_strategy='sample')
+            metrics.append(batch_metrics)
+            naive_metrics.append(batch_naive_metrics)
+
+        self.log_averages(metrics, commit=False)
+        self.log_averages(naive_metrics, commit=False)
+
+        # calculate candidate-averaged metrics
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val')
+
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val',avg_strategy='full_set')
         metrics["val_loss"] = loss.cpu()
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics, commit=False)
 
-        # def log_averages(m):
-        #     for metric in m[0].keys():
-        #         avg_val = torch.stack([x[metric] for x in m]).mean()
-        #         self.logger.experiment.log({metric: avg_val},commit=False)
-
-        # log_averages(metrics)
-        # log_averages(naive_metrics)
 
     def test_epoch_end(self, test_step_outputs):
+        metrics = []
+        naive_metrics = []
+        for batch_probs, batch_labels in test_step_outputs:
+            loss, batch_metrics, batch_naive_metrics = self._calculate_step_metrics_and_loss(batch_probs,batch_labels,batch_size=len(test_step_outputs),prefix='val',avg_strategy='sample')
+            metrics.append(batch_metrics)
+            naive_metrics.append(batch_naive_metrics)
+
+        self.log_averages(metrics, commit=False)
+        self.log_averages(naive_metrics, commit=False)
+
         predicted_probs = torch.cat([o[0] for o in test_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(test_step_outputs),prefix='test')
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(test_step_outputs),prefix='test',avg_strategy='full_set')
         metrics["test_loss"] = loss.cpu()
+
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics)
 
