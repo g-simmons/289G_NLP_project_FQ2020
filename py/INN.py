@@ -88,16 +88,85 @@ class BERTEncoder(pl.LightningModule):
         self.bert = AutoModel.from_pretrained(
             "allenai/scibert_scivocab_uncased", config=self.bert_config
         )
+        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
-    def forward(self, bert_tokens, masks):
+    def parse_bert(self, seq_original, seq_bert):
+        """
+        """
+
+        def remove_leading_pounds(token):
+            """
+            """
+            token_new = ''
+            for c in token:
+                if c != '#':
+                    token_new += c
+            return token_new
+
+        # Iterate over the original sequence and detect splitted tokens.
+        mapped_indices_list = []
+        j = 0
+        for i in range(len(seq_original)):
+            if seq_original[i] == seq_bert[j]:  # Not splitted.
+                j += 1
+                continue
+            else:  # Detect splitted tokens.
+                start = 0
+                token_splitted = seq_original[i]
+                token_mapping = remove_leading_pounds(seq_bert[j])
+                mapped_indices = []
+                while token_mapping == \
+                        token_splitted[start : start + len(token_mapping)]:
+                    mapped_indices.append(j)
+                    start += len(token_mapping)
+                    j += 1
+                    token_mapping = remove_leading_pounds(seq_bert[j])
+                mapped_indices_list.append((i, mapped_indices))
+        return mapped_indices_list
+
+    def Bert_New_Embedding(self,bert,split,shape):
+        '''
+        '''
+        j=0
+        k=0
+        bert_new=torch.zeros([1,shape,768])
+        if len(split) != 0:
+            for i in range(len(split)):
+                while k< split[i][0]:
+                    bert_new[:,k,:]=bert[:,j,:]
+                    j += 1
+                    k += 1
+                for p in range(len(split[i][1])):
+                    j += 1
+
+                bert_new[:,k,:] = torch.sum(bert[:,split[i][1],:],dim = 1)/len(split[i][1])
+                k +=1
+            while k < shape:
+                bert_new[:,k,:]=bert[:,j,:]
+                j += 1
+                k += 1
+        else:
+            bert_new = bert
+            
+        return bert_new
+
+    def forward(self, bert_tokens, masks,text):
         tokens = bert_tokens
 
         bert_outs = []
-        for toks, mask in zip(tokens, masks):
+        for toks, mask, txt in zip(tokens, masks,text):
             bert_out = self.bert(toks, attention_mask=mask)[0]
+
+            a = torch.sum(mask)
+            seq_original = [w.lower() for w in txt.split(' ')]
+            seq_bert = self.tokenizer.tokenize(txt)
+            splits = self.parse_bert(seq_original, seq_bert)
+            bert_out = bert_out[:,0:a,:]
+            bert_out = bert_out[:,1:-1,:]
+            bert_out = self.Bert_New_Embedding(bert_out,splits,len(seq_original))
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
-
+            
         token_splits = [
             len(t) for t in bert_outs
         ]  # should be tokens or bert_tokens? check len matches later on
@@ -168,9 +237,10 @@ class INNModel(pl.LightningModule):
         """
         H_new = torch.clone(H)
         attn_scores = torch.split(
-            self.attn_scores(torch.cat(encoding_out)), token_splits
+            # self.attn_scores(torch.squeeze(encoding_out)),
+            self.attn_scores(torch.cat(encoding_out).to(self.device)),
+            token_splits
         )
-
         h_entities = []
         for sample in range(curr_batch_size):
             sample_entity_indices = [idx[idx >= 0] for idx in entity_indices[sample]]
@@ -196,6 +266,7 @@ class INNModel(pl.LightningModule):
         tokens,
         bert_tokens,
         mask,
+        text,
         entity_spans,
         element_names,
         T,
@@ -205,12 +276,14 @@ class INNModel(pl.LightningModule):
     ):
         encoding_out = None
         if self.encoding_method == "bert":
-            encoding_out, token_splits = self.encoder(bert_tokens, mask)
+            encoding_out, token_splits = self.encoder(bert_tokens, mask,text)
         elif self.encoding_method == "from-scratch":
             encoding_out, token_splits = self.encoder(tokens)
-        if not encoding_out:
+        if encoding_out is None:
             raise ValueError("encoding did not occur check encoding_method")
-
+        for i in range(len(encoding_out)):
+            encoding_out[i] = encoding_out[i].to(self.device)
+        print("encoding_out:", encoding_out[0].device)
         curr_batch_size = len(entity_spans)
 
         # gets the hidden vector for each entity and stores them in H
@@ -280,7 +353,6 @@ class INNModelLightning(pl.LightningModule):
             hidden_state_clamp_val=hidden_state_clamp_val,
             cell_state_clamp_val=cell_state_clamp_val,
         )
-
         self.inn = INNModel(
             vocab_dict=vocab_dict,
             element_to_idx=element_to_idx,
@@ -292,6 +364,7 @@ class INNModelLightning(pl.LightningModule):
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
         )
+
         # loss criterion
         self.criterion = nn.NLLLoss()
 
@@ -364,6 +437,7 @@ class INNModelLightning(pl.LightningModule):
 
 
     def training_step(self, batch_sample, batch_idx):
+        print("training_step:", self.device)
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
 
         true_labels = batch_sample["labels"]
@@ -384,6 +458,7 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["from_scratch_tokens"],
             batch_sample["bert_tokens"],
             batch_sample["mask"],
+            batch_sample["text"],
             batch_sample["entity_spans"],
             batch_sample["element_names"],
             batch_sample["T"],
