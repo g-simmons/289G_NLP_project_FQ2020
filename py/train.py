@@ -142,7 +142,7 @@ def parse_args(args):
     parser.add_argument(
         '-N', '--name',
         nargs='?',
-        default='random_baseline',
+        default='test',
         type=str
     )
     return parser.parse_args(args)
