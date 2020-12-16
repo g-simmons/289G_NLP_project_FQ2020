@@ -131,7 +131,7 @@ class BERTEncoder(pl.LightningModule):
         token_splits = [
             len(t) for t in bert_outs
         ]  # should be tokens or bert_tokens? check len matches later on
-        # bert_outs = torch.unsqueeze(torch.cat(bert_outs), 0)
+
         return bert_outs, token_splits
 
 
@@ -170,7 +170,7 @@ class INNModel(pl.LightningModule):
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
             self.linear_in_dim = 2 * self.word_embedding_dim
-        print("BERT:", self.encoder.device)
+
         self.element_embeddings = nn.Embedding(
             len(element_to_idx.keys()), self.linear_in_dim
         )
@@ -178,7 +178,7 @@ class INNModel(pl.LightningModule):
         self.attn_scores = nn.Linear(in_features=self.linear_in_dim, out_features=1)
 
         self.cell = cell
-        print("DAG:", self.cell.device)
+
         self.output_linear = nn.Sequential(
             nn.Linear(self.linear_in_dim, 4 * self.word_embedding_dim),
             nn.Linear(4 * self.word_embedding_dim, 2),
@@ -242,8 +242,9 @@ class INNModel(pl.LightningModule):
             encoding_out, token_splits = self.encoder(tokens)
         if encoding_out is None:
             raise ValueError("encoding did not occur check encoding_method")
-        print("encoding_out:", encoding_out.device)
-        print("token_splits:", token_splits.device)
+        for i in range(len(encoding_out)):
+            encoding_out[i] = encoding_out[i].to(self.device)
+        print("encoding_out:", encoding_out[0].device)
         curr_batch_size = len(entity_spans)
 
         # gets the hidden vector for each entity and stores them in H
@@ -301,7 +302,6 @@ class INNModelLightning(pl.LightningModule):
         hidden_state_clamp_val,
     ):
         super().__init__()
-        print("MODEL:",self.device)
         self.encoding_method = encoding_method
         if self.encoding_method == "bert":
             encoding_dim = hidden_dim_bert
@@ -325,7 +325,7 @@ class INNModelLightning(pl.LightningModule):
             cell_state_clamp_val=cell_state_clamp_val,
             hidden_state_clamp_val=hidden_state_clamp_val,
         )
-        print("INN:", self.inn.device)
+
         # loss criterion
         self.criterion = nn.NLLLoss()
 
@@ -392,6 +392,7 @@ class INNModelLightning(pl.LightningModule):
 
 
     def training_step(self, batch_sample, batch_idx):
+        print("training_step:", self.device)
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
 
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='train')
