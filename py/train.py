@@ -133,7 +133,7 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         "exclude_samples": EXCLUDE_SAMPLES,
         "freeze_BERT_epoch": freeze_bert_epoch,
         "encoding_method": encoding_method,
-        "nll_positive_weight": nll_positive_weight
+        "nll_positive_weight": nll_positive_weight,
         "guided_training": guided_training
     }
 
