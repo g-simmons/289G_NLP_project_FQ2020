@@ -10,6 +10,45 @@ from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
 
+def update_batch_S(new_batch, batch):
+    S = batch[0]["S"].clone()
+    for i in range(1, len(batch)):
+        s_new = batch[i]["S"].clone()
+        s_new[s_new > -1] += batch[i - 1]["T"].shape[0]
+        S = torch.cat([S, s_new])
+    new_batch["S"] = S
+    return new_batch
+
+
+def collate_list_keys(new_batch, batch, list_keys):
+    for key in list_keys:
+        new_batch[key] = [sample[key] for sample in batch]
+    return new_batch
+
+
+def collate_cat_keys(new_batch, batch, cat_keys):
+    for key in cat_keys:
+        new_batch[key] = torch.cat([sample[key] for sample in batch])
+    return new_batch
+
+
+def collate_func(batch):
+    cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
+    list_keys = ["from_scratch_tokens", "bert_tokens", "entity_spans", "mask"]
+
+    if type(batch) == dict:
+        batch = [batch]
+
+    new_batch = {}
+    new_batch = collate_list_keys(new_batch, batch, list_keys)
+    new_batch = collate_cat_keys(new_batch, batch, cat_keys)
+    new_batch = update_batch_S(new_batch, batch)
+
+    T = torch.arange(len(new_batch["element_names"]))
+    new_batch["T"] = T
+
+    return new_batch
+
 
 class FromScratchEncoder(pl.LightningModule):
     def __init__(self, vocab_dict, word_embedding_dim):
@@ -332,9 +371,13 @@ class INNModelLightning(pl.LightningModule):
         # step metrics
         self.accuracy = pl.metrics.Accuracy()
         self.f1 = pl.metrics.classification.F1()
+        self.precision_score = pl.metrics.classification.Precision()
+        self.recall =  pl.metrics.classification.Recall()
         self.confmat = pl.metrics.classification.ConfusionMatrix(num_classes=2)
 
         self.param_names = [p[0] for p in self.inn.named_parameters()]
+        self.training_candidates = 0 # counter for how many candidates the model has seen
+        self.training_samples =  0
 
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
@@ -348,16 +391,14 @@ class INNModelLightning(pl.LightningModule):
 
         return log_predicted_probs, predicted_labels
 
-    def _get_naive_predicted_probs(self,labels):
+    def _get_naive_all_neg_predicted_probs(self,labels):
         naive_preds = [
             PRED_FALSE for _ in labels
         ]
         naive_preds = torch.stack(naive_preds).to(self.device)
         return naive_preds
 
-    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,batch_sample,batch_size,prefix):
-
-        true_labels = batch_sample["labels"]
+    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix):
 
         metrics = {}
         metrics["acc"] = self.accuracy(predicted_probs, true_labels)
@@ -369,23 +410,27 @@ class INNModelLightning(pl.LightningModule):
         metrics["false_pos"] = fp
         metrics["false_neg"] = fn
         metrics["true_neg"] = tn
-        metrics["num_candidates"] = len(batch_sample["labels"])
+        metrics["precision"] = self.precision_score(predicted_labels, true_labels)
+        metrics["recall"] = self.recall(predicted_labels, true_labels)
+        metrics["num_candidates"] = len(true_labels)
         metrics["predicted_pos"] = torch.sum(predicted_labels)
         metrics["batch_size"] = batch_size
+        metrics["epoch"] = self.current_epoch
+        metrics["training_candidates"] = self.training_candidates
+        metrics["training_samples"] = self.training_samples
 
         return {f'{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
 
-    def _calculate_step_metrics_and_loss(self,predicted_probs,batch_sample,prefix):
-        batch_size = len(batch_sample["entity_spans"])
-        naive_predicted_probs = self._get_naive_predicted_probs(batch_sample['labels'])
+    def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix):
+        naive_predicted_probs = self._get_naive_all_neg_predicted_probs(true_labels)
 
         log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
         log_naive_predicted_probs, naive_predicted_labels = self.convert_predictions(naive_predicted_probs)
 
-        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,predicted_labels,batch_sample,batch_size,prefix=prefix)
-        naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,batch_sample,batch_size,prefix=f"naive_{prefix}")
+        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix=prefix)
+        naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,true_labels,batch_size,prefix=f"naive_{prefix}")
 
-        loss = self.criterion(log_predicted_probs, batch_sample["labels"])
+        loss = self.criterion(log_predicted_probs, true_labels)
         metrics["train_loss"] = loss.cpu()
 
         return loss, metrics, naive_metrics
@@ -395,7 +440,11 @@ class INNModelLightning(pl.LightningModule):
         print("training_step:", self.device)
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
 
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='train')
+        true_labels = batch_sample["labels"]
+        self.training_candidates += len(true_labels)
+        batch_size = len(batch_sample["entity_spans"])
+        self.training_samples += batch_size
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,true_labels,batch_size,prefix='train')
         self.logger.experiment.log(metrics)
         self.logger.experiment.log(naive_metrics)
 
@@ -420,20 +469,23 @@ class INNModelLightning(pl.LightningModule):
 
     def validation_step(self, batch_sample, batch_idx):
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='val')
-        return metrics, naive_metrics
+
+        # loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='val')
+        return predicted_probs, batch_sample
 
     def validation_epoch_end(self, val_step_outputs):
-        metrics = [o[0] for o in val_step_outputs]
-        naive_metrics = [o[1] for o in val_step_outputs]
+        predicted_probs = torch.cat([o[0] for o in val_step_outputs])
+        batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val')
+        self.logger.experiment.log(metrics, commit=False)
+        self.logger.experiment.log(naive_metrics, commit=False)
+        # def log_averages(m):
+        #     for metric in m[0].keys():
+        #         avg_val = torch.stack([x[metric] for x in m]).mean()
+        #         self.logger.experiment.log({metric: avg_val},commit=False)
 
-        def log_averages(m):
-            for metric in m[0].keys():
-                avg_val = torch.stack([x[metric] for x in m]).mean()
-                self.logger.experiment.log({metric: avg_val},commit=False)
-
-        log_averages(metrics)
-        log_averages(naive_metrics)
+        # log_averages(metrics)
+        # log_averages(naive_metrics)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)

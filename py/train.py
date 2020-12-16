@@ -17,47 +17,9 @@ sys.path.append("../lib/BioInfer_software_1.0.1_Python3/")
 
 from bioinferdataset import BioInferDataset
 from config import *
-from INN import INNModelLightning
 
+from INN import INNModelLightning, collate_func
 
-def update_batch_S(new_batch, batch):
-    S = batch[0]["S"].clone()
-    for i in range(1, len(batch)):
-        s_new = batch[i]["S"].clone()
-        s_new[s_new > -1] += batch[i - 1]["T"].shape[0]
-        S = torch.cat([S, s_new])
-    new_batch["S"] = S
-    return new_batch
-
-
-def collate_list_keys(new_batch, batch, list_keys):
-    for key in list_keys:
-        new_batch[key] = [sample[key] for sample in batch]
-    return new_batch
-
-
-def collate_cat_keys(new_batch, batch, cat_keys):
-    for key in cat_keys:
-        new_batch[key] = torch.cat([sample[key] for sample in batch])
-    return new_batch
-
-
-def collate_func(batch):
-    cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
-    list_keys = ["from_scratch_tokens", "bert_tokens", "entity_spans", "mask","text"]
-
-    if type(batch) == dict:
-        batch = [batch]
-
-    new_batch = {}
-    new_batch = collate_list_keys(new_batch, batch, list_keys)
-    new_batch = collate_cat_keys(new_batch, batch, cat_keys)
-    new_batch = update_batch_S(new_batch, batch)
-
-    T = torch.arange(len(new_batch["element_names"]))
-    new_batch["T"] = T
-
-    return new_batch
 
 
 def set_device():
