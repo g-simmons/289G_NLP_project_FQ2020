@@ -341,6 +341,7 @@ class INNModelLightning(pl.LightningModule):
         hidden_dim_bert,
         cell_state_clamp_val,
         hidden_state_clamp_val,
+        train_distribution,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -381,6 +382,8 @@ class INNModelLightning(pl.LightningModule):
         self.training_candidates = 0 # counter for how many candidates the model has seen
         self.training_samples =  0
 
+        self.train_distribution = train_distribution
+
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
         return predictions
@@ -400,13 +403,12 @@ class INNModelLightning(pl.LightningModule):
         naive_preds = torch.stack(naive_preds).to(self.device)
         return naive_preds
 
-    def _get_naive_random_predicted_probs(self, labels):
-        num_elements = labels.numel()
-        percent_ones = labels.sum() / num_elements
+    def _get_naive_random_predicted_probs(self, num_labels):
+        random_nums = torch.rand(num_labels)
+        percent_ones = self.train_distribution[1].item()
 
-        random_nums = torch.rand(num_elements)
         naive_preds = [
-            PRED_TRUE if random_nums[i].item() < percent_ones else PRED_FALSE for i in range(num_elements)
+            PRED_TRUE if random_nums[i].item() < percent_ones else PRED_FALSE for i in range(num_labels)
         ]
         naive_preds = torch.stack(naive_preds).to(self.device)
 
@@ -437,7 +439,7 @@ class INNModelLightning(pl.LightningModule):
 
     def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix):
         naive_neg_predicted_probs = self._get_naive_all_neg_predicted_probs(true_labels)
-        naive_rand_predicted_probs = self._get_naive_random_predicted_probs(true_labels)
+        naive_rand_predicted_probs = self._get_naive_random_predicted_probs(true_labels.numel())
 
         log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
         log_naive_neg_predicted_probs, naive_neg_predicted_labels = self.convert_predictions(naive_neg_predicted_probs)

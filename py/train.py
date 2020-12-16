@@ -58,6 +58,14 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
+def get_distribution(datset):
+    labels = torch.cat([sample["labels"] for sample in datset])
+    num_elements = labels.numel()
+    percent_ones = labels.sum() / num_elements
+
+    return torch.tensor([1 - percent_ones, percent_ones])
+
+
 def train(run_name):
     """Train an INN model and log the training info to wandb.
 
@@ -69,6 +77,7 @@ def train(run_name):
     GPUS = set_device()
     dataset = load_dataset()
     train_set, val_set, test_set = split_data(dataset)
+    train_distribution = get_distribution(train_set)
 
     torch.autograd.set_detect_anomaly(True)
 
@@ -95,6 +104,7 @@ def train(run_name):
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
         encoding_method=ENCODING_METHOD,
+        train_distribution=train_distribution,
     )
 
     wandb_config = {
