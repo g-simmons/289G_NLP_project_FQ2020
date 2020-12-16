@@ -3,13 +3,13 @@
 
 import os
 import sys
+import argparse
 
 import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import WandbLogger
 from torch.utils.data import DataLoader, random_split
-
 import wandb
 
 sys.path.append("../py")
@@ -90,7 +90,14 @@ def split_data(dataset):
     return train_set, val_set
 
 
-if __name__ == "__main__":
+def train(run_name):
+    """Train an INN model and log the training info to wandb.
+
+    Args:
+        run_name (str): A name assigned to this run. The name will appear on
+            Wandb. The default is 'test'.
+
+    """
     GPUS = set_device()
     dataset = load_dataset()
     train_set, val_set = split_data(dataset)
@@ -107,8 +114,6 @@ if __name__ == "__main__":
     val_data_loader = DataLoader(
         val_set, collate_fn=collate_func, batch_size=VAL_BATCH_SIZE, shuffle=VAL_SHUFFLE
     )
-
-    run_name = "test"
 
     model = INNModelLightning(
         vocab_dict=dataset.vocab_dict,
@@ -157,3 +162,18 @@ if __name__ == "__main__":
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)
+
+
+def parse_args(args):
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        '-N', '--name',
+        nargs='?',
+        default='test',
+        type=str
+    )
+    return parser.parse_args(args)
+
+if __name__ == '__main__':
+    args = parse_args(sys.argv[1:])
+    run(args.name)
