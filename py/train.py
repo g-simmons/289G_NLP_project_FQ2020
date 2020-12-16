@@ -2,7 +2,6 @@
 # coding: utf-8
 
 import os
-from py.config import BATCH_SIZE, ENCODING_METHOD, LEARNING_RATE
 import sys
 import argparse
 
@@ -59,7 +58,7 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
-def train(run_name, encoding_method, learning_rate, batch_size, guided_training, freeze_bert_epoch):
+def train(run_name, encoding_method, learning_rate, batch_size, guided_training, epochs, freeze_bert_epoch):
     """Train an INN model and log the training info to wandb.
 
     Args:
@@ -107,8 +106,9 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         "learning_rate": learning_rate,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
         "exclude_samples": EXCLUDE_SAMPLES,
-        "freeze_BERT_epoch": FREEZE_BERT_EPOCH,
-        "encoding_method": encoding_method
+        "freeze_BERT_epoch": freeze_bert_epoch,
+        "encoding_method": encoding_method,
+        # "guided_training": guided_training
     }
 
     wandb_logger = WandbLogger(
@@ -120,14 +120,14 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
     )
     wandb_logger.watch(model, log="gradients", log_freq=1)
 
-    checkpoint_callback = ModelCheckpoint(dirpath=wandb.run.dir, save_top_k=-1)
+    checkpoint_callback = ModelCheckpoint(monitor='val_loss', dirpath=wandb.run.dir, save_top_k=1)
 
     trainer = pl.Trainer(
         gpus=GPUS,
         progress_bar_refresh_rate=1,
         automatic_optimization=False,
         num_sanity_val_steps=2,
-        max_epochs=EPOCHS,
+        max_epochs=epochs,
         val_check_interval=0.25,
         logger=wandb_logger,
         checkpoint_callback=checkpoint_callback, # save the model after each epoch
@@ -183,4 +183,4 @@ def parse_args(args):
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
-    train(args.name)
+    train(args.name, args.encoding_method, args.learning_rate, args.batch_size, args.guided_training, args.epochs, args.freeze_bert_epoch)

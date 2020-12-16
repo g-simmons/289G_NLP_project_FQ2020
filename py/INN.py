@@ -481,8 +481,10 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val')
+        metrics["val_loss"] = loss.cpu()
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics, commit=False)
+
         # def log_averages(m):
         #     for metric in m[0].keys():
         #         avg_val = torch.stack([x[metric] for x in m]).mean()
@@ -495,6 +497,7 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = torch.cat([o[0] for o in test_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(test_step_outputs),prefix='test')
+        metrics["test_loss"] = loss.cpu()
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics)
 
