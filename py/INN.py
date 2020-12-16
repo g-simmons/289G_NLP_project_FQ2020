@@ -94,7 +94,6 @@ class BERTEncoder(pl.LightningModule):
 
     @staticmethod
     def parse_bert(seq_original, offset_mapping):
-        start = 0
         word_split_idx = 0
         word_splits = [len(x) for x in seq_original]
         len_word_splits = len(word_splits)
@@ -120,23 +119,18 @@ class BERTEncoder(pl.LightningModule):
     def forward(self, bert_tokens, masks, text):
         bert_outs = []
         for toks, mask, txt in zip(bert_tokens, masks, text):
-            print(toks)
-            print(text)
             bert_out = self.bert(toks, attention_mask=mask)[0]
 
             a = torch.sum(mask)
             seq_original = [w.lower() for w in txt.split(' ')]
-            # seq_bert = self.tokenizer.tokenize(txt)
             om = self.tokenizer.encode_plus(seq_original,  # the sentence to be encoded
                             add_special_tokens=True,  # Add [CLS] and [SEP]
                             pad_to_max_length=True,  # Add [PAD]s
                             is_split_into_words=True,
-                            return_attention_mask = False,  # Generate the attention mask
+                            return_attention_mask = False,
                             return_offsets_mapping=True,
-                            return_length=False)['offset_mapping']
-            print(om)
+                            return_length=False)['offset_mapping'][1:]
             splits = self.parse_bert(seq_original, om)
-            print(splits)
             bert_out = bert_out[:,0:a,:]
             bert_out = bert_out[:,1:-1,:]
             bert_out = self.bert_new_embedding(bert_out,splits)

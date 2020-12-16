@@ -248,8 +248,11 @@ class TestINNModel:
 
     @pytest.fixture
     def text(self):
-        return 'alpha-catenin inhibits beta-catenin signaling by preventing formation of a beta-catenin*T-cell factor*DNA complex .'
+        return ['alpha-catenin inhibits beta-catenin signaling by preventing formation of a beta-catenin*T-cell factor*DNA complex .']
 
+    @pytest.fixture
+    def stored_forward_results(self):
+        return torch.load('../data/unit_tests/bert_out.tensor')
 
     def test_bert_parsing_integrated(self, seq_original, offset_mapping):
         bert_encodings = torch.randn(1, 28, 768)
@@ -260,9 +263,11 @@ class TestINNModel:
             (new_out[0, 0, :] - bert_encodings[0, 0:4, :].mean(dim=0)) == 0
         )
 
-    def test_bert_forward(self, bert_tokens, mask, text):
+    def test_bert_forward(self, bert_tokens, mask, text, stored_forward_results):
         bert_enc = BERTEncoder(output_bert_hidden_states=False)
-        print(bert_enc.forward( bert_tokens, mask, text))
+        bert_outs, _ = bert_enc.forward(bert_tokens, mask, text)
+        assert (torch.all((bert_outs[0] - stored_forward_results) < 1e-5)) # not exact because results were saved to file
+
 
 
 
