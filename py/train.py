@@ -58,7 +58,7 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
-def train(run_name, encoding_method, learning_rate, batch_size, guided_training, epochs, freeze_bert_epoch):
+def train(run_name, encoding_method, learning_rate, batch_size, guided_training, epochs, freeze_bert_epoch, nll_positive_weight):
     """Train an INN model and log the training info to wandb.
 
     Args:
@@ -94,7 +94,8 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         word_embedding_dim=WORD_EMBEDDING_DIM,
         encoding_method=ENCODING_METHOD,
         learning_rate=learning_rate,
-        freeze_bert_epoch=freeze_bert_epoch
+        freeze_bert_epoch=freeze_bert_epoch,
+        nll_positive_weight=nll_positive_weight
     )
 
     wandb_config = {
@@ -108,6 +109,7 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         "exclude_samples": EXCLUDE_SAMPLES,
         "freeze_BERT_epoch": freeze_bert_epoch,
         "encoding_method": encoding_method,
+        "nll_positive_weight": nll_positive_weight
         # "guided_training": guided_training
     }
 
@@ -176,6 +178,12 @@ def parse_args(args):
         default='2',
         type=int
     )
+    parser.add_argument(
+        '-W', '--nll-positive-weight',
+        nargs='?',
+        default='1',
+        type=float
+    )
     parser.add_argument('--guided-training', dest='guided_training', action='store_true')
     parser.set_defaults(guided_training=False)
 
@@ -183,4 +191,4 @@ def parse_args(args):
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
-    train(args.name, args.encoding_method, args.learning_rate, args.batch_size, args.guided_training, args.epochs, args.freeze_bert_epoch)
+    train(args.name, args.encoding_method, args.learning_rate, args.batch_size, args.guided_training, args.epochs, args.freeze_bert_epoch, args.nll_positive_weight)
