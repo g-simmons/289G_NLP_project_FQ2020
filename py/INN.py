@@ -303,6 +303,8 @@ class INNModelLightning(pl.LightningModule):
         self.confmat = pl.metrics.classification.ConfusionMatrix(num_classes=2)
 
         self.param_names = [p[0] for p in self.inn.named_parameters()]
+        self.training_candidates = 0 # counter for how many candidates the model has seen
+        self.training_samples =  0
 
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
@@ -340,11 +342,13 @@ class INNModelLightning(pl.LightningModule):
         metrics["num_candidates"] = len(true_labels)
         metrics["predicted_pos"] = torch.sum(predicted_labels)
         metrics["batch_size"] = batch_size
+        metrics["epoch"] = self.current_epoch
+        metrics["training_candidates"] = self.training_candidates
+        metrics["training_samples"] = self.training_samples
 
         return {f'{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
 
-    def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,prefix):
-        batch_size = len(true_labels)
+    def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix):
         naive_predicted_probs = self._get_naive_all_neg_predicted_probs(true_labels)
 
         log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
@@ -363,7 +367,10 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
 
         true_labels = batch_sample["labels"]
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,true_labels,prefix='train')
+        self.training_candidates += len(true_labels)
+        batch_size = len(batch_sample["entity_spans"])
+        self.training_samples += batch_size
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,true_labels,batch_size,prefix='train')
         self.logger.experiment.log(metrics)
         self.logger.experiment.log(naive_metrics)
 
@@ -394,7 +401,7 @@ class INNModelLightning(pl.LightningModule):
     def validation_epoch_end(self, val_step_outputs):
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,prefix='val')
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val')
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics, commit=False)
         # def log_averages(m):
