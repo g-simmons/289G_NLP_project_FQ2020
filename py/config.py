@@ -26,6 +26,6 @@ EXCLUDE_SAMPLES = [
 ]
 
 # options are bert, from-scratch
-ENCODING_METHOD = "bert"                #changed for BERT
+ENCODING_METHOD = "from-scratch"                #changed for BERT
 
 VAL_DIMS = False

@@ -58,12 +58,25 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
-def get_distribution(datset):
+def get_concat_avg_distribution(datset):
     labels = torch.cat([sample["labels"] for sample in datset])
     num_elements = labels.numel()
     percent_ones = labels.sum() / num_elements
 
-    return torch.tensor([1 - percent_ones, percent_ones])
+    return percent_ones
+
+def get_avg_avg_distribution(datset):
+    counter = 0
+    percent_ones = 0
+    for sample in datset:
+        counter += 1
+        labels = sample["labels"]
+        num_elements = labels.numel()
+        percent_ones += labels.sum() / num_elements
+
+    percent_ones = percent_ones / counter
+
+    return percent_ones
 
 
 def train(run_name):
@@ -77,7 +90,8 @@ def train(run_name):
     GPUS = set_device()
     dataset = load_dataset()
     train_set, val_set, test_set = split_data(dataset)
-    train_distribution = get_distribution(train_set)
+    train_distribution1 = get_concat_avg_distribution(train_set)
+    train_distribution2 = get_avg_avg_distribution(train_set)
 
     torch.autograd.set_detect_anomaly(True)
 
@@ -104,7 +118,7 @@ def train(run_name):
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
         encoding_method=ENCODING_METHOD,
-        train_distribution=train_distribution,
+        train_distribution=torch.tensor([train_distribution1, train_distribution2]),
     )
 
     wandb_config = {

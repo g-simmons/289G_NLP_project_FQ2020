@@ -403,9 +403,9 @@ class INNModelLightning(pl.LightningModule):
         naive_preds = torch.stack(naive_preds).to(self.device)
         return naive_preds
 
-    def _get_naive_random_predicted_probs(self, num_labels):
+    def _get_naive_random_predicted_probs(self, num_labels, flag):
         random_nums = torch.rand(num_labels)
-        percent_ones = self.train_distribution[1].item()
+        percent_ones = self.train_distribution[flag].item()
 
         naive_preds = [
             PRED_TRUE if random_nums[i].item() < percent_ones else PRED_FALSE for i in range(num_labels)
@@ -439,11 +439,13 @@ class INNModelLightning(pl.LightningModule):
 
     def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix):
         naive_neg_predicted_probs = self._get_naive_all_neg_predicted_probs(true_labels)
-        naive_rand_predicted_probs = self._get_naive_random_predicted_probs(true_labels.numel())
+        naive_rand_predicted_probs1 = self._get_naive_random_predicted_probs(true_labels.numel(), 0)
+        naive_rand_predicted_probs2 = self._get_naive_random_predicted_probs(true_labels.numel(), 1)
 
         log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
         log_naive_neg_predicted_probs, naive_neg_predicted_labels = self.convert_predictions(naive_neg_predicted_probs)
-        log_naive_rand_predicted_probs, naive_rand_predicted_labels = self.convert_predictions(naive_rand_predicted_probs)
+        log_naive_rand_predicted_probs1, naive_rand_predicted_labels1 = self.convert_predictions(naive_rand_predicted_probs1)
+        log_naive_rand_predicted_probs2, naive_rand_predicted_labels2 = self.convert_predictions(naive_rand_predicted_probs2)
 
         metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,
                                                predicted_labels,true_labels,batch_size,prefix=prefix)
@@ -452,14 +454,18 @@ class INNModelLightning(pl.LightningModule):
                                                          naive_neg_predicted_labels,true_labels,
                                                          batch_size, prefix=f"naive_all_neg/{prefix}")
 
-        naive_rand_metrics = self._calculate_step_metrics(naive_rand_predicted_probs, log_naive_rand_predicted_probs,
-                                                          naive_rand_predicted_labels, true_labels,
-                                                          batch_size, prefix=f"naive_random/{prefix}")
+        naive_rand_metrics1 = self._calculate_step_metrics(naive_rand_predicted_probs1, log_naive_rand_predicted_probs1,
+                                                          naive_rand_predicted_labels1, true_labels,
+                                                          batch_size, prefix=f"naive_random1/{prefix}")
+
+        naive_rand_metrics2 = self._calculate_step_metrics(naive_rand_predicted_probs2, log_naive_rand_predicted_probs2,
+                                                          naive_rand_predicted_labels2, true_labels,
+                                                          batch_size, prefix=f"naive_random2/{prefix}")
 
         loss = self.criterion(log_predicted_probs, true_labels)
         metrics["train/loss"] = loss.cpu()
 
-        return loss, metrics, naive_neg_metrics, naive_rand_metrics
+        return loss, metrics, naive_neg_metrics, naive_rand_metrics1, naive_rand_metrics2
 
 
     def training_step(self, batch_sample, batch_idx):
@@ -469,13 +475,15 @@ class INNModelLightning(pl.LightningModule):
         self.training_candidates += len(true_labels)
         batch_size = len(batch_sample["entity_spans"])
         self.training_samples += batch_size
-        loss, metrics, naive_neg_metrics, naive_rand_metrics = self._calculate_step_metrics_and_loss(predicted_probs,
-                                                                                                     true_labels,
-                                                                                                     batch_size,
-                                                                                                     prefix='train')
+        loss, metrics, naive_neg_metrics, \
+        naive_rand_metrics1, naive_rand_metrics2 = self._calculate_step_metrics_and_loss(predicted_probs,
+                                                                                         true_labels,
+                                                                                         batch_size,
+                                                                                         prefix='train')
         self.logger.experiment.log(metrics)
         self.logger.experiment.log(naive_neg_metrics)
-        self.logger.experiment.log(naive_rand_metrics)
+        self.logger.experiment.log(naive_rand_metrics1)
+        self.logger.experiment.log(naive_rand_metrics2)
 
         opt = self.optimizers()
         if metrics["train/predicted_pos"] > len(batch_sample["entity_spans"]):
@@ -507,13 +515,15 @@ class INNModelLightning(pl.LightningModule):
     def validation_epoch_end(self, val_step_outputs):
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
-        loss, metrics, naive_neg_metrics, naive_rand_metrics = self._calculate_step_metrics_and_loss(predicted_probs,
-                                                                                                     batch_labels,
-                                                                                                     batch_size=len(val_step_outputs),
-                                                                                                     prefix='val')
+        loss, metrics, naive_neg_metrics, \
+        naive_rand_metrics1, naive_rand_metrics2 = self._calculate_step_metrics_and_loss(predicted_probs,
+                                                                                         batch_labels,
+                                                                                         batch_size=len(val_step_outputs),
+                                                                                         prefix='val')
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_neg_metrics, commit=False)
-        self.logger.experiment.log(naive_rand_metrics, commit=False)
+        self.logger.experiment.log(naive_rand_metrics1, commit=False)
+        self.logger.experiment.log(naive_rand_metrics2, commit=False)
         # def log_averages(m):
         #     for metric in m[0].keys():
         #         avg_val = torch.stack([x[metric] for x in m]).mean()
@@ -525,13 +535,15 @@ class INNModelLightning(pl.LightningModule):
     def test_epoch_end(self, test_step_outputs):
         predicted_probs = torch.cat([o[0] for o in test_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
-        loss, metrics, naive_neg_metrics, naive_rand_metrics = self._calculate_step_metrics_and_loss(predicted_probs,
-                                                                                                     batch_labels,
-                                                                                                     batch_size=len(test_step_outputs),
-                                                                                                     prefix='test')
+        loss, metrics, naive_neg_metrics, \
+        naive_rand_metrics1, naive_rand_metrics2 = self._calculate_step_metrics_and_loss(predicted_probs,
+                                                                                         batch_labels,
+                                                                                         batch_size=len(test_step_outputs),
+                                                                                         prefix='test')
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_neg_metrics)
-        self.logger.experiment.log(naive_rand_metrics)
+        self.logger.experiment.log(naive_rand_metrics1)
+        self.logger.experiment.log(naive_rand_metrics2)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
