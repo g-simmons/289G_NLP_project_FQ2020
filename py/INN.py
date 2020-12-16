@@ -10,6 +10,8 @@ from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
 
+import re
+
 def update_batch_S(new_batch, batch):
     S = batch[0]["S"].clone()
     for i in range(1, len(batch)):
@@ -91,90 +93,54 @@ class BERTEncoder(pl.LightningModule):
         )
         self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
-    def parse_bert(self, seq_original, seq_bert):
+    @staticmethod
+    def parse_bert(seq_original, offset_mapping):
+        word_split_idx = 0
+        word_splits = [len(x) for x in seq_original]
+        len_word_splits = len(word_splits)
+        split_size_counter = 0
 
-        def remove_leading_pounds(token):
+        om = offset_mapping[1:]
+        bert_splits = []
 
-            token_new = ''
-            for c in token:
-                if c != '#':
-                    token_new += c
-            return token_new
+        for omap in offset_mapping:
+            split_size_counter += 1
+            if omap[1] == word_splits[word_split_idx]:
+                bert_splits.append(split_size_counter)
+                split_size_counter = 0
+                word_split_idx+=1
+                if word_split_idx == len_word_splits:
+                    break
+        return bert_splits
 
-        # Iterate over the original sequence and detect splitted tokens.
-        mapped_indices_list = []
-        j = 0
-        for i in range(len(seq_original)):
-            if seq_original[i] == seq_bert[j]:  # Not splitted.
-                j += 1
-                continue
-            else:  # Detect splitted tokens.
-                start = 0
-                token_splitted = seq_original[i]
-                token_mapping = remove_leading_pounds(seq_bert[j])
-                mapped_indices = []
-                while token_mapping == \
-                        token_splitted[start : start + len(token_mapping)]:
-                    mapped_indices.append(j)
-                    start += len(token_mapping)
-                    j += 1
-                    if j == len(seq_bert):
-                        break
-                    else:
-                        token_mapping = remove_leading_pounds(seq_bert[j])
-                mapped_indices_list.append((i, mapped_indices))
-        return mapped_indices_list
+    @staticmethod
+    def bert_new_embedding(bert_encodings,split):
+        return torch.stack([torch.mean(chunk,dim=0) for chunk in torch.split(bert_encodings[0],split)]).unsqueeze(0)
 
-    def Bert_New_Embedding(self,bert,split,shape):
-        '''
-        '''
-        j=0
-        k=0
-        bert_new=torch.zeros([1,shape,768])
-        if len(split) != 0:
-            for i in range(len(split)):
-                while k< split[i][0]:
-                    bert_new[:,k,:]=bert[:,j,:]
-                    j += 1
-                    k += 1
-                for p in range(len(split[i][1])):
-                    j += 1
-
-                bert_new[:,k,:] = torch.sum(bert[:,split[i][1],:],dim = 1)/len(split[i][1])
-                k +=1
-            while k < shape:
-                bert_new[:,k,:]=bert[:,j,:]
-                j += 1
-                k += 1
-        else:
-            bert_new = bert
-
-        return bert_new
-
-    def forward(self, bert_tokens, masks, text, epoch):
-        tokens = bert_tokens
-
+    def forward(self, bert_tokens, masks, text):
         bert_outs = []
-        for toks, mask, txt in zip(tokens, masks,text):
-            if(epoch < self.freeze_bert_epoch):
-                bert_out = self.bert(toks, attention_mask=mask)[0]
-            else:
-                with torch.no_grad():
-                    bert_out = self.bert(toks, attention_mask=mask)[0]
+        for toks, mask, txt in zip(bert_tokens, masks, text):
+            bert_out = self.bert(toks, attention_mask=mask)[0]
 
             a = torch.sum(mask)
             seq_original = [w.lower() for w in txt.split(' ')]
-            seq_bert = self.tokenizer.tokenize(txt)
-            splits = self.parse_bert(seq_original, seq_bert)
+            om = self.tokenizer.encode_plus(seq_original,  # the sentence to be encoded
+                            add_special_tokens=True,  # Add [CLS] and [SEP]
+                            pad_to_max_length=True,  # Add [PAD]s
+                            is_split_into_words=True,
+                            return_attention_mask = False,
+                            return_offsets_mapping=True,
+                            return_length=False)['offset_mapping'][1:]
+            splits = self.parse_bert(seq_original, om)
             bert_out = bert_out[:,0:a,:]
             bert_out = bert_out[:,1:-1,:]
-            bert_out = self.Bert_New_Embedding(bert_out,splits,len(seq_original))
+            bert_out = self.bert_new_embedding(bert_out,splits)
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
 
         token_splits = [
             len(t) for t in bert_outs
-        ]  # should be tokens or bert_tokens? check len matches later on
+        ]
 
         return bert_outs, token_splits
 
