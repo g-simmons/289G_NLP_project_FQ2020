@@ -469,8 +469,10 @@ class INNModelLightning(pl.LightningModule):
 
     def validation_step(self, batch_sample, batch_idx):
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
+        return predicted_probs, batch_sample
 
-        # loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_sample,prefix='val')
+    def test_step(self, batch_sample, batch_idx):
+        predicted_probs = self.inn(*self.expand_batch(batch_sample))
         return predicted_probs, batch_sample
 
     def validation_epoch_end(self, val_step_outputs):
@@ -486,6 +488,13 @@ class INNModelLightning(pl.LightningModule):
 
         # log_averages(metrics)
         # log_averages(naive_metrics)
+
+    def test_epoch_end(self, test_step_outputs):
+        predicted_probs = torch.cat([o[0] for o in test_step_outputs])
+        batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(test_step_outputs),prefix='test')
+        self.logger.experiment.log(metrics, commit=False)
+        self.logger.experiment.log(naive_metrics)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
