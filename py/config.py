@@ -16,7 +16,7 @@ HIDDEN_STATE_CLAMP_VAL = 1e6
 PREPPED_DATA_PATH = "../data/prepped_dataset.pickle"
 XML_PATH = "../data/BioInfer_corpus_1.1.1.xml"
 
-WORD_EMBEDDING_DIM = 768                        #changed for BERT
+WORD_EMBEDDING_DIM = 256                        #changed for BERT
 BLSTM_OUT_DIM = 2 * WORD_EMBEDDING_DIM
 HIDDEN_DIM_BERT = 768
 # MASK_PREVIOUS_ARGS = False
@@ -26,6 +26,6 @@ EXCLUDE_SAMPLES = [
 ]
 
 # options are bert, from-scratch
-ENCODING_METHOD = "bert"                #changed for BERT
+ENCODING_METHOD = "from-scratch"                #changed for BERT
 
 VAL_DIMS = False
