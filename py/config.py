@@ -27,5 +27,6 @@ EXCLUDE_SAMPLES = [
 
 # options are bert, from-scratch
 ENCODING_METHOD = "bert"                #changed for BERT
+FREEZE_BERT_EPOCH = 2
 
 VAL_DIMS = False

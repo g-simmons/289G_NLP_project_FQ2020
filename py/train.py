@@ -126,7 +126,7 @@ def train(run_name):
         progress_bar_refresh_rate=1,
         automatic_optimization=False,
         num_sanity_val_steps=2,
-        max_epochs=3,
+        max_epochs=EPOCHS,
         val_check_interval=0.25,
         logger=wandb_logger,
         checkpoint_callback=checkpoint_callback, # save the model after each epoch
