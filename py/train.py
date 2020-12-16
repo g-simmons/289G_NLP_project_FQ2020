@@ -108,6 +108,7 @@ def train(run_name):
         "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
         "exclude_samples": EXCLUDE_SAMPLES,
+        "freeze_BERT_epoch": FREEZE_BERT_EPOCH,
     }
 
     wandb_logger = WandbLogger(
