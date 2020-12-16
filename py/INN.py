@@ -242,6 +242,7 @@ class INNModel(pl.LightningModule):
         T,
         S,
         L,
+        labels,
         is_entity,
         epoch,
     ):
@@ -275,8 +276,12 @@ class INNModel(pl.LightningModule):
         predictions = [
             PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
         ]
+        gold_predictions = [
+            PRED_TRUE if v == 1 else PRED_FALSE for v in labels
+        ]
         predictions = torch.stack(predictions).to(self.device)
         predictions.requires_grad_()
+        gold_predictions = torch.stack(gold_predictions).to(self.device)
 
         for layer in torch.unique(L):
             if layer > 0:
@@ -476,6 +481,7 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["T"],
             batch_sample["S"],
             batch_sample["L"],
+            batch_sample["labels"],
             batch_sample["is_entity"],
             self.current_epoch,
         )
