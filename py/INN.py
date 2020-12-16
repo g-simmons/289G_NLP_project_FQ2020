@@ -380,6 +380,10 @@ class INNModelLightning(pl.LightningModule):
         self.param_names = [p[0] for p in self.inn.named_parameters()]
         self.training_candidates = 0 # counter for how many candidates the model has seen
         self.training_samples =  0
+        self._patience_count = 0
+        self._patience = 3
+        self._gap_threshold = 0.1
+        self._status = None
 
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
@@ -448,7 +452,8 @@ class INNModelLightning(pl.LightningModule):
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,true_labels,batch_size,prefix='train')
         self.logger.experiment.log(metrics)
         self.logger.experiment.log(naive_metrics)
-
+        self._train_loss = loss
+    
         opt = self.optimizers()
         if metrics["train_predicted_pos"] > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
@@ -480,6 +485,7 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val')
+        self._val_loss = loss
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics, commit=False)
         # def log_averages(m):
@@ -489,6 +495,24 @@ class INNModelLightning(pl.LightningModule):
 
         # log_averages(metrics)
         # log_averages(naive_metrics)
+
+    def on_train_batch_start(self, batch, batch_idx, dataloader_idx):
+        return self._status
+
+    def training_epoch_end(self, training_step_outputs):
+        if self.current_epoch == 0:
+            self.prev_gap = 0
+        else:
+            self.prev_gap = self.curr_gap
+        self.curr_gap = self._val_loss - self._train_loss
+        self.gap_inc = self.curr_gap - self.prev_gap
+        if self.gap_inc > self._gap_threshold:
+            self._patience_count += 1
+        else:
+            self._patience_count = 0
+        if self._patience_count == self._patience:
+            self._status = -1
+        print("The gap has increased by:", self.gap_inc)
 
     def test_epoch_end(self, test_step_outputs):
         predicted_probs = torch.cat([o[0] for o in test_step_outputs])
