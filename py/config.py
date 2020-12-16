@@ -1,7 +1,7 @@
 ENTITY_PREFIX = "e-"
 PREDICATE_PREFIX = "p-"
 
-EPOCHS = 2                      #changed for BERT
+EPOCHS = 5                      #changed for BERT
 BATCH_SIZE = 16
 VAL_BATCH_SIZE = 1
 TEST_BATCH_SIZE = 1
@@ -27,5 +27,6 @@ EXCLUDE_SAMPLES = [
 
 # options are bert, from-scratch
 ENCODING_METHOD = "bert"                #changed for BERT
+FREEZE_BERT_EPOCH = 2
 
 VAL_DIMS = False

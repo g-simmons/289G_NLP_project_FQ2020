@@ -153,12 +153,16 @@ class BERTEncoder(pl.LightningModule):
             
         return bert_new
 
-    def forward(self, bert_tokens, masks,text):
+    def forward(self, bert_tokens, masks,text,epoch):
         tokens = bert_tokens
 
         bert_outs = []
         for toks, mask, txt in zip(tokens, masks,text):
-            bert_out = self.bert(toks, attention_mask=mask)[0]
+            if(epoch < FREEZE_BERT_EPOCH):
+                bert_out = self.bert(toks, attention_mask=mask)[0]
+            else:
+                with torch.no_grad():
+                    bert_out = self.bert(toks, attention_mask=mask)[0]
 
             a = torch.sum(mask)
             seq_original = [w.lower() for w in txt.split(' ')]
@@ -276,10 +280,11 @@ class INNModel(pl.LightningModule):
         S,
         L,
         is_entity,
+        epoch,
     ):
         encoding_out = None
         if self.encoding_method == "bert":
-            encoding_out, token_splits = self.encoder(bert_tokens, mask,text)
+            encoding_out, token_splits = self.encoder(bert_tokens, mask,text,epoch)
         elif self.encoding_method == "from-scratch":
             encoding_out, token_splits = self.encoder(tokens)
         if encoding_out is None:
@@ -466,6 +471,7 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["S"],
             batch_sample["L"],
             batch_sample["is_entity"],
+            self.current_epoch,
         )
 
     def validation_step(self, batch_sample, batch_idx):
