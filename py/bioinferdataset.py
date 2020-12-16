@@ -95,7 +95,7 @@ def process_sample(sample, inverse_schema):
     # only need certain elements from data
     del sample["relation_graphs"]
     del sample["node_idx_to_element_idxs"]
-    del sample["text"]
+    # del sample["text"]
     del sample["element_locs"]
 
     return sample
