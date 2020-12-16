@@ -92,8 +92,6 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training)
         hidden_dim_bert=HIDDEN_DIM_BERT,
         output_bert_hidden_states=False,
         word_embedding_dim=WORD_EMBEDDING_DIM,
-        cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
-        hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
         encoding_method=ENCODING_METHOD,
         learning_rate=learning_rate
     )
@@ -105,8 +103,6 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training)
         "val_shuffle":VAL_SHUFFLE,
         "max_layers": MAX_LAYERS,
         "learning_rate": learning_rate,
-        "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
-        "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
         "exclude_samples": EXCLUDE_SAMPLES,
         "freeze_BERT_epoch": FREEZE_BERT_EPOCH,

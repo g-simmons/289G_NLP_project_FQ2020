@@ -201,8 +201,6 @@ class INNModel(pl.LightningModule):
         word_embedding_dim,
         hidden_dim_bert,
         cell,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -344,8 +342,6 @@ class INNModelLightning(pl.LightningModule):
         output_bert_hidden_states,
         word_embedding_dim,
         hidden_dim_bert,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
         learning_rate,
     ):
         super().__init__()
@@ -358,8 +354,6 @@ class INNModelLightning(pl.LightningModule):
         self.cell = DAGLSTMCell(
             encoding_dim=encoding_dim,
             max_inputs=2,
-            hidden_state_clamp_val=hidden_state_clamp_val,
-            cell_state_clamp_val=cell_state_clamp_val,
         )
         self.inn = INNModel(
             vocab_dict=vocab_dict,
@@ -369,8 +363,6 @@ class INNModelLightning(pl.LightningModule):
             hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             cell=self.cell,
-            cell_state_clamp_val=cell_state_clamp_val,
-            hidden_state_clamp_val=hidden_state_clamp_val,
         )
 
         # loss criterion
