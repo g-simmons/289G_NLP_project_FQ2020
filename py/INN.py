@@ -309,6 +309,7 @@ class INNModelLightning(pl.LightningModule):
         hidden_dim_bert,
         learning_rate,
         freeze_bert_epoch,
+        nll_positive_weight,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -331,9 +332,10 @@ class INNModelLightning(pl.LightningModule):
             cell=self.cell,
             freeze_bert_epoch=freeze_bert_epoch
         )
+        self.nll_positive_weight = nll_positive_weight
 
         # loss criterion
-        self.criterion = nn.NLLLoss()
+        self.criterion = nn.NLLLoss(weight=torch.tensor([1,self.nll_positive_weight]))
 
         # step metrics
         self.accuracy = pl.metrics.Accuracy()
