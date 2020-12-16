@@ -58,7 +58,7 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
-def train(run_name):
+def train(run_name, encoding_method, learning_rate, batch_size, guided_training, epochs, freeze_bert_epoch, nll_positive_weight):
     """Train an INN model and log the training info to wandb.
 
     Args:
@@ -75,7 +75,7 @@ def train(run_name):
     train_data_loader = DataLoader(
         train_set,
         collate_fn=collate_func,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         drop_last=True,
         shuffle=False,
     )
@@ -92,22 +92,25 @@ def train(run_name):
         hidden_dim_bert=HIDDEN_DIM_BERT,
         output_bert_hidden_states=False,
         word_embedding_dim=WORD_EMBEDDING_DIM,
-        cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
-        hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
         encoding_method=ENCODING_METHOD,
+        learning_rate=learning_rate,
+        freeze_bert_epoch=freeze_bert_epoch,
+        nll_positive_weight=nll_positive_weight
     )
 
     wandb_config = {
         "GPUS": int(GPUS),
-        "batch_size": BATCH_SIZE,
+        "batch_size": batch_size,
         "val_batch_size":VAL_BATCH_SIZE,
         "val_shuffle":VAL_SHUFFLE,
         "max_layers": MAX_LAYERS,
-        "learning_rate": LEARNING_RATE,
-        "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
-        "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
+        "learning_rate": learning_rate,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
         "exclude_samples": EXCLUDE_SAMPLES,
+        "freeze_BERT_epoch": freeze_bert_epoch,
+        "encoding_method": encoding_method,
+        "nll_positive_weight": nll_positive_weight
+        # "guided_training": guided_training
     }
 
     wandb_logger = WandbLogger(
@@ -119,14 +122,14 @@ def train(run_name):
     )
     wandb_logger.watch(model, log="gradients", log_freq=1)
 
-    checkpoint_callback = ModelCheckpoint(dirpath=wandb.run.dir, save_top_k=-1)
+    checkpoint_callback = ModelCheckpoint(monitor='val_loss', dirpath=wandb.run.dir, save_top_k=1)
 
     trainer = pl.Trainer(
         gpus=GPUS,
         progress_bar_refresh_rate=1,
         automatic_optimization=False,
         num_sanity_val_steps=2,
-        max_epochs=3,
+        max_epochs=epochs,
         val_check_interval=0.25,
         logger=wandb_logger,
         checkpoint_callback=checkpoint_callback, # save the model after each epoch
@@ -145,8 +148,47 @@ def parse_args(args):
         default='test',
         type=str
     )
+    parser.add_argument(
+        '-E', '--encoding-method',
+        nargs='?',
+        default=ENCODING_METHOD,
+        type=str
+    )
+    parser.add_argument(
+        '-L', '--learning-rate',
+        nargs='?',
+        default=LEARNING_RATE,
+        type=float
+    )
+    parser.add_argument(
+        '-B', '--batch-size',
+        nargs='?',
+        default=BATCH_SIZE,
+        type=int
+    )
+    parser.add_argument(
+        '-P', '--epochs',
+        nargs='?',
+        default=EPOCHS,
+        type=int
+    )
+    parser.add_argument(
+        '-F', '--freeze-bert-epoch',
+        nargs='?',
+        default='2',
+        type=int
+    )
+    parser.add_argument(
+        '-W', '--nll-positive-weight',
+        nargs='?',
+        default='1',
+        type=float
+    )
+    parser.add_argument('--guided-training', dest='guided_training', action='store_true')
+    parser.set_defaults(guided_training=False)
+
     return parser.parse_args(args)
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
-    train(args.name)
+    train(args.name, args.encoding_method, args.learning_rate, args.batch_size, args.guided_training, args.epochs, args.freeze_bert_epoch, args.nll_positive_weight)
