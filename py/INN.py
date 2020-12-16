@@ -10,6 +10,8 @@ from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
 
+import re
+
 def update_batch_S(new_batch, batch):
     S = batch[0]["S"].clone()
     for i in range(1, len(batch)):
@@ -76,8 +78,9 @@ class FromScratchEncoder(pl.LightningModule):
 
 
 class BERTEncoder(pl.LightningModule):
-    def __init__(self, output_bert_hidden_states):
+    def __init__(self, output_bert_hidden_states, freeze_bert_epoch):
         super().__init__()
+        self.freeze_bert_epoch = freeze_bert_epoch
         print('loading pretrained BERT...')
         self.bert_config = AutoConfig.from_pretrained(
             "allenai/scibert_scivocab_uncased"
@@ -90,89 +93,54 @@ class BERTEncoder(pl.LightningModule):
         )
         self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
-    def parse_bert(self, seq_original, seq_bert):
-        """
-        """
+    @staticmethod
+    def parse_bert(seq_original, offset_mapping):
+        word_split_idx = 0
+        word_splits = [len(x) for x in seq_original]
+        len_word_splits = len(word_splits)
+        split_size_counter = 0
 
-        def remove_leading_pounds(token):
-            """
-            """
-            token_new = ''
-            for c in token:
-                if c != '#':
-                    token_new += c
-            return token_new
+        om = offset_mapping[1:]
+        bert_splits = []
 
-        # Iterate over the original sequence and detect splitted tokens.
-        mapped_indices_list = []
-        j = 0
-        for i in range(len(seq_original)):
-            if seq_original[i] == seq_bert[j]:  # Not splitted.
-                j += 1
-                continue
-            else:  # Detect splitted tokens.
-                start = 0
-                token_splitted = seq_original[i]
-                token_mapping = remove_leading_pounds(seq_bert[j])
-                mapped_indices = []
-                while token_mapping == \
-                        token_splitted[start : start + len(token_mapping)]:
-                    mapped_indices.append(j)
-                    start += len(token_mapping)
-                    j += 1
-                    if j == len(seq_bert):
-                        break
-                    else:
-                        token_mapping = remove_leading_pounds(seq_bert[j])
-                mapped_indices_list.append((i, mapped_indices))
-        return mapped_indices_list
+        for omap in offset_mapping:
+            split_size_counter += 1
+            if omap[1] == word_splits[word_split_idx]:
+                bert_splits.append(split_size_counter)
+                split_size_counter = 0
+                word_split_idx+=1
+                if word_split_idx == len_word_splits:
+                    break
+        return bert_splits
 
-    def Bert_New_Embedding(self,bert,split,shape):
-        '''
-        '''
-        j=0
-        k=0
-        bert_new=torch.zeros([1,shape,768])
-        if len(split) != 0:
-            for i in range(len(split)):
-                while k< split[i][0]:
-                    bert_new[:,k,:]=bert[:,j,:]
-                    j += 1
-                    k += 1
-                for p in range(len(split[i][1])):
-                    j += 1
+    @staticmethod
+    def bert_new_embedding(bert_encodings,split):
+        return torch.stack([torch.mean(chunk,dim=0) for chunk in torch.split(bert_encodings[0],split)]).unsqueeze(0)
 
-                bert_new[:,k,:] = torch.sum(bert[:,split[i][1],:],dim = 1)/len(split[i][1])
-                k +=1
-            while k < shape:
-                bert_new[:,k,:]=bert[:,j,:]
-                j += 1
-                k += 1
-        else:
-            bert_new = bert
-            
-        return bert_new
-
-    def forward(self, bert_tokens, masks,text):
-        tokens = bert_tokens
-
+    def forward(self, bert_tokens, masks, text):
         bert_outs = []
-        for toks, mask, txt in zip(tokens, masks,text):
+        for toks, mask, txt in zip(bert_tokens, masks, text):
             bert_out = self.bert(toks, attention_mask=mask)[0]
 
             a = torch.sum(mask)
             seq_original = [w.lower() for w in txt.split(' ')]
-            seq_bert = self.tokenizer.tokenize(txt)
-            splits = self.parse_bert(seq_original, seq_bert)
+            om = self.tokenizer.encode_plus(seq_original,  # the sentence to be encoded
+                            add_special_tokens=True,  # Add [CLS] and [SEP]
+                            pad_to_max_length=True,  # Add [PAD]s
+                            is_split_into_words=True,
+                            return_attention_mask = False,
+                            return_offsets_mapping=True,
+                            return_length=False)['offset_mapping'][1:]
+            splits = self.parse_bert(seq_original, om)
             bert_out = bert_out[:,0:a,:]
             bert_out = bert_out[:,1:-1,:]
-            bert_out = self.Bert_New_Embedding(bert_out,splits,len(seq_original))
+            bert_out = self.bert_new_embedding(bert_out,splits)
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
-            
+
         token_splits = [
             len(t) for t in bert_outs
-        ]  # should be tokens or bert_tokens? check len matches later on
+        ]
 
         return bert_outs, token_splits
 
@@ -197,8 +165,7 @@ class INNModel(pl.LightningModule):
         word_embedding_dim,
         hidden_dim_bert,
         cell,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
+        freeze_bert_epoch,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -207,7 +174,7 @@ class INNModel(pl.LightningModule):
         self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
-            self.encoder = BERTEncoder(self.output_bert_hidden_states)
+            self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch)
             self.linear_in_dim = self.hidden_dim_bert
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
@@ -276,10 +243,11 @@ class INNModel(pl.LightningModule):
         S,
         L,
         is_entity,
+        epoch,
     ):
         encoding_out = None
         if self.encoding_method == "bert":
-            encoding_out, token_splits = self.encoder(bert_tokens, mask,text)
+            encoding_out, token_splits = self.encoder(bert_tokens, mask,text,epoch)
         elif self.encoding_method == "from-scratch":
             encoding_out, token_splits = self.encoder(tokens)
         if encoding_out is None:
@@ -339,9 +307,10 @@ class INNModelLightning(pl.LightningModule):
         output_bert_hidden_states,
         word_embedding_dim,
         hidden_dim_bert,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
         train_distribution,
+        learning_rate,
+        freeze_bert_epoch,
+        nll_positive_weight,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -353,8 +322,6 @@ class INNModelLightning(pl.LightningModule):
         self.cell = DAGLSTMCell(
             encoding_dim=encoding_dim,
             max_inputs=2,
-            hidden_state_clamp_val=hidden_state_clamp_val,
-            cell_state_clamp_val=cell_state_clamp_val,
         )
         self.inn = INNModel(
             vocab_dict=vocab_dict,
@@ -364,12 +331,12 @@ class INNModelLightning(pl.LightningModule):
             hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             cell=self.cell,
-            cell_state_clamp_val=cell_state_clamp_val,
-            hidden_state_clamp_val=hidden_state_clamp_val,
+            freeze_bert_epoch=freeze_bert_epoch
         )
+        self.nll_positive_weight = nll_positive_weight
 
         # loss criterion
-        self.criterion = nn.NLLLoss()
+        self.criterion = nn.NLLLoss(weight=torch.tensor([1,self.nll_positive_weight]))
 
         # step metrics
         self.accuracy = pl.metrics.Accuracy()
@@ -381,6 +348,7 @@ class INNModelLightning(pl.LightningModule):
         self.param_names = [p[0] for p in self.inn.named_parameters()]
         self.training_candidates = 0 # counter for how many candidates the model has seen
         self.training_samples =  0
+        self.lr = learning_rate
 
         self.train_distribution = train_distribution
 
@@ -414,7 +382,10 @@ class INNModelLightning(pl.LightningModule):
 
         return naive_preds
 
-    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix):
+    def _calculate_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix,avg_strategy):
+        """
+        calculate  various performance metrics based on predicted probabilities and true labels
+        """
 
         metrics = {}
         metrics["acc"] = self.accuracy(predicted_probs, true_labels)
@@ -435,9 +406,13 @@ class INNModelLightning(pl.LightningModule):
         metrics["training_candidates"] = self.training_candidates
         metrics["training_samples"] = self.training_samples
 
-        return {f'{prefix}/{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
 
-    def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix):
+        return {f'{prefix}_{k}_{avg_strategy}_avg': torch.tensor(v).float().cpu() for k, v in metrics.items()}
+
+    def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix,avg_strategy):
+        """
+        Calculates performance metrics for model predictions as well as several naive strategies
+        """
         naive_neg_predicted_probs = self._get_naive_all_neg_predicted_probs(true_labels)
         naive_rand_predicted_probs1 = self._get_naive_random_predicted_probs(true_labels.numel(), 0)
         naive_rand_predicted_probs2 = self._get_naive_random_predicted_probs(true_labels.numel(), 1)
@@ -447,20 +422,20 @@ class INNModelLightning(pl.LightningModule):
         log_naive_rand_predicted_probs1, naive_rand_predicted_labels1 = self.convert_predictions(naive_rand_predicted_probs1)
         log_naive_rand_predicted_probs2, naive_rand_predicted_labels2 = self.convert_predictions(naive_rand_predicted_probs2)
 
-        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,
-                                               predicted_labels,true_labels,batch_size,prefix=prefix)
+        metrics = self._calculate_metrics(predicted_probs,log_predicted_probs,
+                                               predicted_labels,true_labels,batch_size,prefix=prefix,avg_strategy=avg_strategy)
 
-        naive_neg_metrics = self._calculate_step_metrics(naive_neg_predicted_probs,log_naive_neg_predicted_probs,
+        naive_neg_metrics = self._calculate_metrics(naive_neg_predicted_probs,log_naive_neg_predicted_probs,
                                                          naive_neg_predicted_labels,true_labels,
-                                                         batch_size, prefix=f"naive_all_neg/{prefix}")
+                                                         batch_size, prefix=f"naive_all_neg/{prefix}",avg_strategy=avg_strategy)
 
-        naive_rand_metrics1 = self._calculate_step_metrics(naive_rand_predicted_probs1, log_naive_rand_predicted_probs1,
+        naive_rand_metrics1 = self._calculate_metrics(naive_rand_predicted_probs1, log_naive_rand_predicted_probs1,
                                                           naive_rand_predicted_labels1, true_labels,
-                                                          batch_size, prefix=f"naive_random1/{prefix}")
+                                                          batch_size, prefix=f"naive_random1/{prefix}",avg_strategy=avg_strategy)
 
-        naive_rand_metrics2 = self._calculate_step_metrics(naive_rand_predicted_probs2, log_naive_rand_predicted_probs2,
+        naive_rand_metrics2 = self._calculate_metrics(naive_rand_predicted_probs2, log_naive_rand_predicted_probs2,
                                                           naive_rand_predicted_labels2, true_labels,
-                                                          batch_size, prefix=f"naive_random2/{prefix}")
+                                                          batch_size, prefix=f"naive_random2/{prefix}",avg_strategy=avg_strategy)
 
         loss = self.criterion(log_predicted_probs, true_labels)
         metrics["train/loss"] = loss.cpu()
@@ -479,14 +454,14 @@ class INNModelLightning(pl.LightningModule):
         naive_rand_metrics1, naive_rand_metrics2 = self._calculate_step_metrics_and_loss(predicted_probs,
                                                                                          true_labels,
                                                                                          batch_size,
-                                                                                         prefix='train')
+                                                                                         prefix='train',avg_strategy='batch')
         self.logger.experiment.log(metrics)
         self.logger.experiment.log(naive_neg_metrics)
         self.logger.experiment.log(naive_rand_metrics1)
         self.logger.experiment.log(naive_rand_metrics2)
 
         opt = self.optimizers()
-        if metrics["train/predicted_pos"] > len(batch_sample["entity_spans"]):
+        if metrics["train_predicted_pos_batch_avg"] > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
             opt.step()
 
@@ -502,6 +477,7 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["S"],
             batch_sample["L"],
             batch_sample["is_entity"],
+            self.current_epoch,
         )
 
     def validation_step(self, batch_sample, batch_idx):
@@ -512,39 +488,48 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
         return predicted_probs, batch_sample
 
-    def validation_epoch_end(self, val_step_outputs):
-        predicted_probs = torch.cat([o[0] for o in val_step_outputs])
-        batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
+    def log_averages(self,m):
+        for metric in m[0].keys():
+            avg_val = torch.stack([x[metric] for x in m]).mean()
+            self.logger.experiment.log({metric: avg_val},commit=False)
+
+    def _log_epoch_end_performance_sample_avg(self,step_outputs,prefix):
+        metrics = []
+        naive_neg_metrics = []
+        naive_rand_metrics1 = []
+        naive_rand_metrics2 = []
+
+        for batch_probs, batch_sample in step_outputs:
+            batch_labels = batch_sample['labels']
+            loss, batch_metrics, batch_naive_neg_metrics, batch_naive_rand_metrics1, batch_naive_rand_metrics2 = self._calculate_step_metrics_and_loss(batch_probs,batch_labels,batch_size=len(step_outputs),prefix=prefix,avg_strategy='sample') #depends on batch_size=1 for this to actually be "sample" avg
+            metrics.append(batch_metrics)
+            naive_neg_metrics.append(batch_naive_neg_metrics)
+            naive_rand_metrics1.append(batch_naive_rand_metrics1)
+            naive_rand_metrics2.append(batch_naive_rand_metrics2)
+
+        for metrs in [metrics, naive_neg_metrics, naive_rand_metrics1, naive_rand_metrics2]:
+            self.log_averages(metrs)
+
+    def _log_epoch_end_performance_full_set_avg(self,step_outputs,prefix):
+        predicted_probs = torch.cat([o[0] for o in step_outputs])
+        batch_labels = torch.cat([o[1]["labels"] for o in step_outputs])
         loss, metrics, naive_neg_metrics, \
         naive_rand_metrics1, naive_rand_metrics2 = self._calculate_step_metrics_and_loss(predicted_probs,
                                                                                          batch_labels,
-                                                                                         batch_size=len(val_step_outputs),
-                                                                                         prefix='val')
-        self.logger.experiment.log(metrics, commit=False)
-        self.logger.experiment.log(naive_neg_metrics, commit=False)
-        self.logger.experiment.log(naive_rand_metrics1, commit=False)
-        self.logger.experiment.log(naive_rand_metrics2, commit=False)
-        # def log_averages(m):
-        #     for metric in m[0].keys():
-        #         avg_val = torch.stack([x[metric] for x in m]).mean()
-        #         self.logger.experiment.log({metric: avg_val},commit=False)
+                                                                                         batch_size=len(step_outputs),
+                                                                                         prefix=prefix,avg_strategy='full_set')
+        metrics[f"{prefix}_loss"] = loss.cpu()
+        for metrs in [metrics, naive_neg_metrics, naive_rand_metrics1, naive_rand_metrics2]:
+            self.logger.experiment.log(metrs, commit=False)
 
-        # log_averages(metrics)
-        # log_averages(naive_metrics)
+    def validation_epoch_end(self, val_step_outputs):
+        self._log_epoch_end_performance_sample_avg(val_step_outputs,prefix='val')
+        self._log_epoch_end_performance_full_set_avg(val_step_outputs,prefix='val')
 
     def test_epoch_end(self, test_step_outputs):
-        predicted_probs = torch.cat([o[0] for o in test_step_outputs])
-        batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
-        loss, metrics, naive_neg_metrics, \
-        naive_rand_metrics1, naive_rand_metrics2 = self._calculate_step_metrics_and_loss(predicted_probs,
-                                                                                         batch_labels,
-                                                                                         batch_size=len(test_step_outputs),
-                                                                                         prefix='test')
-        self.logger.experiment.log(metrics, commit=False)
-        self.logger.experiment.log(naive_neg_metrics)
-        self.logger.experiment.log(naive_rand_metrics1)
-        self.logger.experiment.log(naive_rand_metrics2)
+        self._log_epoch_end_performance_sample_avg(test_step_outputs,prefix='test')
+        self._log_epoch_end_performance_full_set_avg(test_step_outputs,prefix='test')
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
+        optimizer = torch.optim.Adadelta(self.parameters(), lr=self.lr)
         return optimizer
