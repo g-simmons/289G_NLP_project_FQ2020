@@ -120,7 +120,10 @@ class BERTEncoder(pl.LightningModule):
                     mapped_indices.append(j)
                     start += len(token_mapping)
                     j += 1
-                    token_mapping = remove_leading_pounds(seq_bert[j])
+                    if j == len(seq_bert):
+                        break
+                    else:
+                        token_mapping = remove_leading_pounds(seq_bert[j])
                 mapped_indices_list.append((i, mapped_indices))
         return mapped_indices_list
 
@@ -283,7 +286,6 @@ class INNModel(pl.LightningModule):
             raise ValueError("encoding did not occur check encoding_method")
         for i in range(len(encoding_out)):
             encoding_out[i] = encoding_out[i].to(self.device)
-        print("encoding_out:", encoding_out[0].device)
         curr_batch_size = len(entity_spans)
 
         # gets the hidden vector for each entity and stores them in H
@@ -437,7 +439,6 @@ class INNModelLightning(pl.LightningModule):
 
 
     def training_step(self, batch_sample, batch_idx):
-        print("training_step:", self.device)
         predicted_probs = self.inn(*self.expand_batch(batch_sample))
 
         true_labels = batch_sample["labels"]
