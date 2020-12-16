@@ -1,7 +1,7 @@
 ENTITY_PREFIX = "e-"
 PREDICATE_PREFIX = "p-"
 
-EPOCHS = 2                      #changed for BERT
+EPOCHS = 5                      #changed for BERT
 BATCH_SIZE = 16
 VAL_BATCH_SIZE = 1
 TEST_BATCH_SIZE = 1
