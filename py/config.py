@@ -10,9 +10,6 @@ MAX_LAYERS = 2
 MAX_ENTITY_TOKENS = 5
 LEARNING_RATE = 0.01                #changed for BERT
 
-CELL_STATE_CLAMP_VAL = 1e4
-HIDDEN_STATE_CLAMP_VAL = 1e6
-
 PREPPED_DATA_PATH = "../data/prepped_dataset.pickle"
 XML_PATH = "../data/BioInfer_corpus_1.1.1.xml"
 

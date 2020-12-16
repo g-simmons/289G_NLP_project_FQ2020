@@ -76,8 +76,9 @@ class FromScratchEncoder(pl.LightningModule):
 
 
 class BERTEncoder(pl.LightningModule):
-    def __init__(self, output_bert_hidden_states):
+    def __init__(self, output_bert_hidden_states, freeze_bert_epoch):
         super().__init__()
+        self.freeze_bert_epoch = freeze_bert_epoch
         print('loading pretrained BERT...')
         self.bert_config = AutoConfig.from_pretrained(
             "allenai/scibert_scivocab_uncased"
@@ -91,12 +92,9 @@ class BERTEncoder(pl.LightningModule):
         self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
     def parse_bert(self, seq_original, seq_bert):
-        """
-        """
 
         def remove_leading_pounds(token):
-            """
-            """
+
             token_new = ''
             for c in token:
                 if c != '#':
@@ -150,15 +148,15 @@ class BERTEncoder(pl.LightningModule):
                 k += 1
         else:
             bert_new = bert
-            
+
         return bert_new
 
-    def forward(self, bert_tokens, masks,text,epoch):
+    def forward(self, bert_tokens, masks, text, epoch):
         tokens = bert_tokens
 
         bert_outs = []
         for toks, mask, txt in zip(tokens, masks,text):
-            if(epoch < FREEZE_BERT_EPOCH):
+            if(epoch < self.freeze_bert_epoch):
                 bert_out = self.bert(toks, attention_mask=mask)[0]
             else:
                 with torch.no_grad():
@@ -173,7 +171,7 @@ class BERTEncoder(pl.LightningModule):
             bert_out = self.Bert_New_Embedding(bert_out,splits,len(seq_original))
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
-            
+
         token_splits = [
             len(t) for t in bert_outs
         ]  # should be tokens or bert_tokens? check len matches later on
@@ -201,8 +199,7 @@ class INNModel(pl.LightningModule):
         word_embedding_dim,
         hidden_dim_bert,
         cell,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
+        freeze_bert_epoch,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -211,7 +208,7 @@ class INNModel(pl.LightningModule):
         self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
-            self.encoder = BERTEncoder(self.output_bert_hidden_states)
+            self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch)
             self.linear_in_dim = self.hidden_dim_bert
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
@@ -344,8 +341,8 @@ class INNModelLightning(pl.LightningModule):
         output_bert_hidden_states,
         word_embedding_dim,
         hidden_dim_bert,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
+        learning_rate,
+        freeze_bert_epoch,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -357,8 +354,6 @@ class INNModelLightning(pl.LightningModule):
         self.cell = DAGLSTMCell(
             encoding_dim=encoding_dim,
             max_inputs=2,
-            hidden_state_clamp_val=hidden_state_clamp_val,
-            cell_state_clamp_val=cell_state_clamp_val,
         )
         self.inn = INNModel(
             vocab_dict=vocab_dict,
@@ -368,8 +363,7 @@ class INNModelLightning(pl.LightningModule):
             hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             cell=self.cell,
-            cell_state_clamp_val=cell_state_clamp_val,
-            hidden_state_clamp_val=hidden_state_clamp_val,
+            freeze_bert_epoch=freeze_bert_epoch
         )
 
         # loss criterion
@@ -385,6 +379,7 @@ class INNModelLightning(pl.LightningModule):
         self.param_names = [p[0] for p in self.inn.named_parameters()]
         self.training_candidates = 0 # counter for how many candidates the model has seen
         self.training_samples =  0
+        self.lr = learning_rate
 
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
@@ -486,8 +481,10 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val')
+        metrics["val_loss"] = loss.cpu()
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics, commit=False)
+
         # def log_averages(m):
         #     for metric in m[0].keys():
         #         avg_val = torch.stack([x[metric] for x in m]).mean()
@@ -500,9 +497,10 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = torch.cat([o[0] for o in test_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(test_step_outputs),prefix='test')
+        metrics["test_loss"] = loss.cpu()
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
+        optimizer = torch.optim.Adadelta(self.parameters(), lr=self.lr)
         return optimizer

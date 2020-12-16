@@ -14,8 +14,6 @@ class TestDAGLSTM:
         cell = DAGLSTMCell(
             blstm_out_dim=HIDDEN_DIM,
             max_inputs=MAX_INPUTS,
-            hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
-            cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         )
 
         H = torch.randn(10 * MAX_INPUTS, HIDDEN_DIM).reshape(10, -1)
