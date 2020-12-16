@@ -160,7 +160,6 @@ class BERTEncoder(pl.LightningModule):
         for toks, mask, txt in zip(tokens, masks,text):
             if(epoch < FREEZE_BERT_EPOCH):
                 bert_out = self.bert(toks, attention_mask=mask)[0]
-                print("Training Bert")
             else:
                 with torch.no_grad():
                     bert_out = self.bert(toks, attention_mask=mask)[0]
