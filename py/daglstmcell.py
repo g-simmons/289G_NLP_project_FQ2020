@@ -12,15 +12,11 @@ class DAGLSTMCell(pl.LightningModule):
         self,
         encoding_dim: int,
         max_inputs: int,
-        hidden_state_clamp_val: float,
-        cell_state_clamp_val: float,
     ):
         super(DAGLSTMCell, self).__init__()
         self.hidden_dim = encoding_dim
         self.relation_embedding_dim = self.hidden_dim
         self.max_inputs = max_inputs
-        self.hidden_state_clamp_val = hidden_state_clamp_val
-        self.cell_state_clamp_val = cell_state_clamp_val
 
         ioc_out_dim = 3 * self.hidden_dim
         self.W_ioc_hat = nn.Linear(self.relation_embedding_dim, ioc_out_dim, bias=False)

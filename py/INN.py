@@ -78,8 +78,9 @@ class FromScratchEncoder(pl.LightningModule):
 
 
 class BERTEncoder(pl.LightningModule):
-    def __init__(self, output_bert_hidden_states):
+    def __init__(self, output_bert_hidden_states, freeze_bert_epoch):
         super().__init__()
+        self.freeze_bert_epoch = freeze_bert_epoch
         print('loading pretrained BERT...')
         self.bert_config = AutoConfig.from_pretrained(
             "allenai/scibert_scivocab_uncased"
@@ -164,8 +165,7 @@ class INNModel(pl.LightningModule):
         word_embedding_dim,
         hidden_dim_bert,
         cell,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
+        freeze_bert_epoch,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -174,7 +174,7 @@ class INNModel(pl.LightningModule):
         self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
-            self.encoder = BERTEncoder(self.output_bert_hidden_states)
+            self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch)
             self.linear_in_dim = self.hidden_dim_bert
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
@@ -243,10 +243,11 @@ class INNModel(pl.LightningModule):
         S,
         L,
         is_entity,
+        epoch,
     ):
         encoding_out = None
         if self.encoding_method == "bert":
-            encoding_out, token_splits = self.encoder(bert_tokens, mask,text)
+            encoding_out, token_splits = self.encoder(bert_tokens, mask,text,epoch)
         elif self.encoding_method == "from-scratch":
             encoding_out, token_splits = self.encoder(tokens)
         if encoding_out is None:
@@ -306,8 +307,8 @@ class INNModelLightning(pl.LightningModule):
         output_bert_hidden_states,
         word_embedding_dim,
         hidden_dim_bert,
-        cell_state_clamp_val,
-        hidden_state_clamp_val,
+        learning_rate,
+        freeze_bert_epoch,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -319,8 +320,6 @@ class INNModelLightning(pl.LightningModule):
         self.cell = DAGLSTMCell(
             encoding_dim=encoding_dim,
             max_inputs=2,
-            hidden_state_clamp_val=hidden_state_clamp_val,
-            cell_state_clamp_val=cell_state_clamp_val,
         )
         self.inn = INNModel(
             vocab_dict=vocab_dict,
@@ -330,8 +329,7 @@ class INNModelLightning(pl.LightningModule):
             hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             cell=self.cell,
-            cell_state_clamp_val=cell_state_clamp_val,
-            hidden_state_clamp_val=hidden_state_clamp_val,
+            freeze_bert_epoch=freeze_bert_epoch
         )
 
         # loss criterion
@@ -347,6 +345,7 @@ class INNModelLightning(pl.LightningModule):
         self.param_names = [p[0] for p in self.inn.named_parameters()]
         self.training_candidates = 0 # counter for how many candidates the model has seen
         self.training_samples =  0
+        self.lr = learning_rate
 
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
@@ -433,6 +432,7 @@ class INNModelLightning(pl.LightningModule):
             batch_sample["S"],
             batch_sample["L"],
             batch_sample["is_entity"],
+            self.current_epoch,
         )
 
     def validation_step(self, batch_sample, batch_idx):
@@ -447,8 +447,10 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in val_step_outputs])
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val')
+        metrics["val_loss"] = loss.cpu()
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics, commit=False)
+
         # def log_averages(m):
         #     for metric in m[0].keys():
         #         avg_val = torch.stack([x[metric] for x in m]).mean()
@@ -461,9 +463,10 @@ class INNModelLightning(pl.LightningModule):
         predicted_probs = torch.cat([o[0] for o in test_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
         loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,batch_labels,batch_size=len(test_step_outputs),prefix='test')
+        metrics["test_loss"] = loss.cpu()
         self.logger.experiment.log(metrics, commit=False)
         self.logger.experiment.log(naive_metrics)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
+        optimizer = torch.optim.Adadelta(self.parameters(), lr=self.lr)
         return optimizer
