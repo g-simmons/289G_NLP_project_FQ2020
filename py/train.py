@@ -58,6 +58,26 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
+def get_full_set_avg_distribution(datset):
+    labels = torch.cat([sample["labels"] for sample in datset])
+    num_elements = labels.numel()
+    percent_ones = labels.sum() / num_elements
+
+    return percent_ones
+
+def get_sample_avg_distribution(dataset):
+    counter = 0
+    percent_ones = 0
+    for sample in dataset:
+        counter += 1
+        labels = sample["labels"]
+        num_elements = labels.numel()
+        percent_ones += labels.sum() / num_elements
+
+    percent_ones = percent_ones / counter
+
+    return percent_ones
+
 def train(run_name, encoding_method, learning_rate, batch_size, guided_training, epochs, freeze_bert_epoch, nll_positive_weight):
     """Train an INN model and log the training info to wandb.
 
@@ -69,6 +89,8 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
     GPUS = set_device()
     dataset = load_dataset()
     train_set, val_set, test_set = split_data(dataset)
+    train_distribution1 = get_full_set_avg_distribution(train_set)
+    train_distribution2 = get_sample_avg_distribution(train_set)
 
     torch.autograd.set_detect_anomaly(True)
 
@@ -92,7 +114,8 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         hidden_dim_bert=HIDDEN_DIM_BERT,
         output_bert_hidden_states=False,
         word_embedding_dim=WORD_EMBEDDING_DIM,
-        encoding_method=ENCODING_METHOD,
+        encoding_method=encoding_method,
+        train_distribution=torch.tensor([train_distribution1, train_distribution2]),
         learning_rate=learning_rate,
         freeze_bert_epoch=freeze_bert_epoch,
         nll_positive_weight=nll_positive_weight
