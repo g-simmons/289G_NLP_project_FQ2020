@@ -368,7 +368,10 @@ class INNModelLightning(pl.LightningModule):
         naive_preds = torch.stack(naive_preds).to(self.device)
         return naive_preds
 
-    def _calculate_step_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix,avg_strategy):
+    def _calculate_metrics(self,predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix,avg_strategy):
+        """
+        calculate  various performance metrics based on predicted probabilities and true labels
+        """
 
         metrics = {}
         metrics["acc"] = self.accuracy(predicted_probs, true_labels)
@@ -389,16 +392,20 @@ class INNModelLightning(pl.LightningModule):
         metrics["training_candidates"] = self.training_candidates
         metrics["training_samples"] = self.training_samples
 
-        return {f'{avg_strategy}_{prefix}_{k}': torch.tensor(v).float().cpu() for k, v in metrics.items()}
+        return {f'{prefix}_{k}_{avg_strategy}_avg': torch.tensor(v).float().cpu() for k, v in metrics.items()}
 
     def _calculate_step_metrics_and_loss(self,predicted_probs,true_labels,batch_size,prefix,avg_strategy):
+        """
+        Calculates performance metrics for model predictions as well as several naive strategies
+        """
+
         naive_predicted_probs = self._get_naive_all_neg_predicted_probs(true_labels)
 
         log_predicted_probs, predicted_labels = self.convert_predictions(predicted_probs)
         log_naive_predicted_probs, naive_predicted_labels = self.convert_predictions(naive_predicted_probs)
 
-        metrics = self._calculate_step_metrics(predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix=prefix,avg_strategy=avg_strategy)
-        naive_metrics = self._calculate_step_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,true_labels,batch_size,prefix=f"naive_{prefix}",avg_strategy=avg_strategy)
+        metrics = self._calculate_metrics(predicted_probs,log_predicted_probs,predicted_labels,true_labels,batch_size,prefix=prefix,avg_strategy=avg_strategy)
+        naive_metrics = self._calculate_metrics(naive_predicted_probs,log_naive_predicted_probs,naive_predicted_labels,true_labels,batch_size,prefix=f"naive_{prefix}",avg_strategy=avg_strategy)
 
         loss = self.criterion(log_predicted_probs, true_labels)
         metrics["train_loss"] = loss.cpu()
@@ -413,12 +420,12 @@ class INNModelLightning(pl.LightningModule):
         self.training_candidates += len(true_labels)
         batch_size = len(batch_sample["entity_spans"])
         self.training_samples += batch_size
-        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,true_labels,batch_size,prefix='train')
+        loss, metrics, naive_metrics = self._calculate_step_metrics_and_loss(predicted_probs,true_labels,batch_size,prefix='train',avg_strategy='batch')
         self.logger.experiment.log(metrics)
         self.logger.experiment.log(naive_metrics)
 
         opt = self.optimizers()
-        if metrics["train_predicted_pos"] > len(batch_sample["entity_spans"]):
+        if metrics["train_predicted_pos_batch_avg"] > len(batch_sample["entity_spans"]):
             self.manual_backward(loss, opt)
             opt.step()
 
@@ -453,13 +460,14 @@ class INNModelLightning(pl.LightningModule):
     def validation_epoch_end(self, val_step_outputs):
         metrics = []
         naive_metrics = []
-        for batch_probs, batch_labels in val_step_outputs:
-            loss, batch_metrics, batch_naive_metrics = self._calculate_step_metrics_and_loss(batch_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val',avg_strategy='sample')
+        for batch_probs, batch_sample in val_step_outputs:
+            batch_labels = batch_sample['labels']
+            loss, batch_metrics, batch_naive_metrics = self._calculate_step_metrics_and_loss(batch_probs,batch_labels,batch_size=len(val_step_outputs),prefix='val',avg_strategy='sample') #depends on batch_size=1 for this to actually be "sample" avg
             metrics.append(batch_metrics)
             naive_metrics.append(batch_naive_metrics)
 
-        self.log_averages(metrics, commit=False)
-        self.log_averages(naive_metrics, commit=False)
+        self.log_averages(metrics)
+        self.log_averages(naive_metrics)
 
         # calculate candidate-averaged metrics
         predicted_probs = torch.cat([o[0] for o in val_step_outputs])
@@ -474,13 +482,14 @@ class INNModelLightning(pl.LightningModule):
     def test_epoch_end(self, test_step_outputs):
         metrics = []
         naive_metrics = []
-        for batch_probs, batch_labels in test_step_outputs:
+        for batch_probs, batch_sample in test_step_outputs:
+            batch_labels = batch_sample['labels']
             loss, batch_metrics, batch_naive_metrics = self._calculate_step_metrics_and_loss(batch_probs,batch_labels,batch_size=len(test_step_outputs),prefix='val',avg_strategy='sample')
             metrics.append(batch_metrics)
             naive_metrics.append(batch_naive_metrics)
 
-        self.log_averages(metrics, commit=False)
-        self.log_averages(naive_metrics, commit=False)
+        self.log_averages(metrics)
+        self.log_averages(naive_metrics)
 
         predicted_probs = torch.cat([o[0] for o in test_step_outputs])
         batch_labels = torch.cat([o[1]["labels"] for o in test_step_outputs])
