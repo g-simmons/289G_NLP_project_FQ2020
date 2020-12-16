@@ -76,8 +76,9 @@ class FromScratchEncoder(pl.LightningModule):
 
 
 class BERTEncoder(pl.LightningModule):
-    def __init__(self, output_bert_hidden_states):
+    def __init__(self, output_bert_hidden_states, freeze_bert_epoch):
         super().__init__()
+        self.freeze_bert_epoch = freeze_bert_epoch
         print('loading pretrained BERT...')
         self.bert_config = AutoConfig.from_pretrained(
             "allenai/scibert_scivocab_uncased"
@@ -91,12 +92,9 @@ class BERTEncoder(pl.LightningModule):
         self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
     def parse_bert(self, seq_original, seq_bert):
-        """
-        """
 
         def remove_leading_pounds(token):
-            """
-            """
+
             token_new = ''
             for c in token:
                 if c != '#':
@@ -153,12 +151,12 @@ class BERTEncoder(pl.LightningModule):
 
         return bert_new
 
-    def forward(self, bert_tokens, masks,text,epoch):
+    def forward(self, bert_tokens, masks, text, epoch):
         tokens = bert_tokens
 
         bert_outs = []
         for toks, mask, txt in zip(tokens, masks,text):
-            if(epoch < FREEZE_BERT_EPOCH):
+            if(epoch < self.freeze_bert_epoch):
                 bert_out = self.bert(toks, attention_mask=mask)[0]
             else:
                 with torch.no_grad():
@@ -201,6 +199,7 @@ class INNModel(pl.LightningModule):
         word_embedding_dim,
         hidden_dim_bert,
         cell,
+        freeze_bert_epoch,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -209,7 +208,7 @@ class INNModel(pl.LightningModule):
         self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
-            self.encoder = BERTEncoder(self.output_bert_hidden_states)
+            self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch)
             self.linear_in_dim = self.hidden_dim_bert
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
@@ -343,6 +342,7 @@ class INNModelLightning(pl.LightningModule):
         word_embedding_dim,
         hidden_dim_bert,
         learning_rate,
+        freeze_bert_epoch,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -363,6 +363,7 @@ class INNModelLightning(pl.LightningModule):
             hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             cell=self.cell,
+            freeze_bert_epoch=freeze_bert_epoch
         )
 
         # loss criterion

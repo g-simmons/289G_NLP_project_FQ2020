@@ -2,6 +2,7 @@
 # coding: utf-8
 
 import os
+from py.config import BATCH_SIZE, ENCODING_METHOD, LEARNING_RATE
 import sys
 import argparse
 
@@ -58,7 +59,7 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
-def train(run_name, encoding_method, learning_rate, batch_size, guided_training):
+def train(run_name, encoding_method, learning_rate, batch_size, guided_training, freeze_bert_epoch):
     """Train an INN model and log the training info to wandb.
 
     Args:
@@ -93,7 +94,8 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training)
         output_bert_hidden_states=False,
         word_embedding_dim=WORD_EMBEDDING_DIM,
         encoding_method=ENCODING_METHOD,
-        learning_rate=learning_rate
+        learning_rate=learning_rate,
+        freeze_bert_epoch=freeze_bert_epoch
     )
 
     wandb_config = {
@@ -106,6 +108,7 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training)
         "word_embedding_dim": WORD_EMBEDDING_DIM,
         "exclude_samples": EXCLUDE_SAMPLES,
         "freeze_BERT_epoch": FREEZE_BERT_EPOCH,
+        "encoding_method": encoding_method
     }
 
     wandb_logger = WandbLogger(
@@ -146,25 +149,35 @@ def parse_args(args):
     parser.add_argument(
         '-E', '--encoding-method',
         nargs='?',
-        default='from-scratch',
+        default=ENCODING_METHOD,
         type=str
     )
     parser.add_argument(
         '-L', '--learning-rate',
         nargs='?',
-        default='0.1',
+        default=LEARNING_RATE,
         type=float
     )
     parser.add_argument(
         '-B', '--batch-size',
         nargs='?',
-        default='16',
+        default=BATCH_SIZE,
+        type=int
+    )
+    parser.add_argument(
+        '-P', '--epochs',
+        nargs='?',
+        default=EPOCHS,
+        type=int
+    )
+    parser.add_argument(
+        '-F', '--freeze-bert-epoch',
+        nargs='?',
+        default='2',
         type=int
     )
     parser.add_argument('--guided-training', dest='guided_training', action='store_true')
     parser.set_defaults(guided_training=False)
-
-
 
     return parser.parse_args(args)
 
