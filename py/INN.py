@@ -35,7 +35,7 @@ def collate_cat_keys(new_batch, batch, cat_keys):
 
 
 def collate_func(batch):
-    cat_keys = ["element_names", "L", "labels", "is_entity", "L"]
+    cat_keys = ["element_names", "L", "labels", "is_entity"]
     list_keys = ["from_scratch_tokens", "bert_tokens", "entity_spans", "mask", "text"]
 
     if type(batch) == dict:
