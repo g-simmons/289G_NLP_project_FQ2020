@@ -43,17 +43,23 @@ def load_dataset():
 
 
 def split_data(dataset):
-    train_max_range = round(0.8 * len(dataset))
+    train_max_range = round(0.7 * len(dataset))
+    val_max_range = round(0.9 * len(dataset))
+    test_max_range = len(dataset)
+
     train_idx = range(0, train_max_range)
-    val_idx = range(train_max_range, len(dataset))
-    train_set, val_set = random_split(dataset, lengths=[len(train_idx), len(val_idx)])
-    return train_set, val_set
+    val_idx = range(train_max_range, val_max_range)
+    test_idx= range(val_max_range,test_max_range)
+
+    train_set, val_set, test_set = random_split(dataset, lengths=[len(train_idx), len(val_idx), len(test_idx)])
+
+    return train_set, val_set, test_set
 
 
 if __name__ == "__main__":
     GPUS = set_device()
     dataset = load_dataset()
-    train_set, val_set = split_data(dataset)
+    train_set, val_set, test_set = split_data(dataset)
 
     torch.autograd.set_detect_anomaly(True)
 
@@ -66,6 +72,9 @@ if __name__ == "__main__":
     )
     val_data_loader = DataLoader(
         val_set, collate_fn=collate_func, batch_size=VAL_BATCH_SIZE, shuffle=VAL_SHUFFLE
+    )
+    test_data_loader = DataLoader(
+        test_set, collate_fn=collate_func, batch_size=TEST_BATCH_SIZE,
     )
 
     run_name = "test"
@@ -117,3 +126,6 @@ if __name__ == "__main__":
     )
 
     trainer.fit(model, train_data_loader, val_data_loader)
+
+    test_results = trainer.test(test_dataloaders=test_data_loader)
+    print(test_results)
