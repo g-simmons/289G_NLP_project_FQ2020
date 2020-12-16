@@ -166,11 +166,13 @@ class INNModel(pl.LightningModule):
         hidden_dim_bert,
         cell,
         freeze_bert_epoch,
+        guided_training
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
         self.hidden_dim_bert = hidden_dim_bert
         self.encoding_method = encoding_method
+        self.guided_training = guided_training
         self.output_bert_hidden_states = output_bert_hidden_states
 
         if self.encoding_method == "bert":
@@ -316,6 +318,7 @@ class INNModelLightning(pl.LightningModule):
         learning_rate,
         freeze_bert_epoch,
         nll_positive_weight,
+        guided_training
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -323,6 +326,8 @@ class INNModelLightning(pl.LightningModule):
             encoding_dim = hidden_dim_bert
         else:
             encoding_dim = 2 * word_embedding_dim
+
+        self.guided_training = guided_training
 
         self.cell = DAGLSTMCell(
             encoding_dim=encoding_dim,
@@ -336,7 +341,8 @@ class INNModelLightning(pl.LightningModule):
             hidden_dim_bert=hidden_dim_bert,
             word_embedding_dim=word_embedding_dim,
             cell=self.cell,
-            freeze_bert_epoch=freeze_bert_epoch
+            freeze_bert_epoch=freeze_bert_epoch,
+            guided_training=self.guided_training
         )
         self.nll_positive_weight = nll_positive_weight
 

@@ -118,7 +118,8 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         train_distribution=torch.tensor([train_distribution1, train_distribution2]),
         learning_rate=learning_rate,
         freeze_bert_epoch=freeze_bert_epoch,
-        nll_positive_weight=nll_positive_weight
+        nll_positive_weight=nll_positive_weight,
+        guided_training=guided_training
     )
 
     wandb_config = {
@@ -133,7 +134,7 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         "freeze_BERT_epoch": freeze_bert_epoch,
         "encoding_method": encoding_method,
         "nll_positive_weight": nll_positive_weight
-        # "guided_training": guided_training
+        "guided_training": guided_training
     }
 
     wandb_logger = WandbLogger(
