@@ -58,7 +58,7 @@ def split_data(dataset):
     return train_set, val_set, test_set
 
 
-def train(run_name):
+def train(run_name, encoding_method, learning_rate, batch_size, guided_training):
     """Train an INN model and log the training info to wandb.
 
     Args:
@@ -75,7 +75,7 @@ def train(run_name):
     train_data_loader = DataLoader(
         train_set,
         collate_fn=collate_func,
-        batch_size=BATCH_SIZE,
+        batch_size=batch_size,
         drop_last=True,
         shuffle=False,
     )
@@ -95,15 +95,16 @@ def train(run_name):
         cell_state_clamp_val=CELL_STATE_CLAMP_VAL,
         hidden_state_clamp_val=HIDDEN_STATE_CLAMP_VAL,
         encoding_method=ENCODING_METHOD,
+        learning_rate=learning_rate
     )
 
     wandb_config = {
         "GPUS": int(GPUS),
-        "batch_size": BATCH_SIZE,
+        "batch_size": batch_size,
         "val_batch_size":VAL_BATCH_SIZE,
         "val_shuffle":VAL_SHUFFLE,
         "max_layers": MAX_LAYERS,
-        "learning_rate": LEARNING_RATE,
+        "learning_rate": learning_rate,
         "cell_state_clamp_val": CELL_STATE_CLAMP_VAL,
         "hidden_state_clamp_val": HIDDEN_STATE_CLAMP_VAL,
         "word_embedding_dim": WORD_EMBEDDING_DIM,
@@ -146,6 +147,29 @@ def parse_args(args):
         default='test',
         type=str
     )
+    parser.add_argument(
+        '-E', '--encoding-method',
+        nargs='?',
+        default='from-scratch',
+        type=str
+    )
+    parser.add_argument(
+        '-L', '--learning-rate',
+        nargs='?',
+        default='0.1',
+        type=float
+    )
+    parser.add_argument(
+        '-B', '--batch-size',
+        nargs='?',
+        default='16',
+        type=int
+    )
+    parser.add_argument('--guided-training', dest='guided_training', action='store_true')
+    parser.set_defaults(guided_training=False)
+
+
+
     return parser.parse_args(args)
 
 if __name__ == '__main__':

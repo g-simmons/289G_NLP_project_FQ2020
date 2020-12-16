@@ -150,7 +150,7 @@ class BERTEncoder(pl.LightningModule):
                 k += 1
         else:
             bert_new = bert
-            
+
         return bert_new
 
     def forward(self, bert_tokens, masks,text,epoch):
@@ -173,7 +173,7 @@ class BERTEncoder(pl.LightningModule):
             bert_out = self.Bert_New_Embedding(bert_out,splits,len(seq_original))
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
-            
+
         token_splits = [
             len(t) for t in bert_outs
         ]  # should be tokens or bert_tokens? check len matches later on
@@ -346,6 +346,7 @@ class INNModelLightning(pl.LightningModule):
         hidden_dim_bert,
         cell_state_clamp_val,
         hidden_state_clamp_val,
+        learning_rate,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -385,6 +386,7 @@ class INNModelLightning(pl.LightningModule):
         self.param_names = [p[0] for p in self.inn.named_parameters()]
         self.training_candidates = 0 # counter for how many candidates the model has seen
         self.training_samples =  0
+        self.lr = learning_rate
 
     def forward(self, batch_sample):
         predictions = self.inn(*self.expand_batch(batch_sample))
@@ -504,5 +506,5 @@ class INNModelLightning(pl.LightningModule):
         self.logger.experiment.log(naive_metrics)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adadelta(self.parameters(), lr=LEARNING_RATE)
+        optimizer = torch.optim.Adadelta(self.parameters(), lr=self.lr)
         return optimizer
