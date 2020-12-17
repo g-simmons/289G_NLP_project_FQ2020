@@ -13,7 +13,12 @@ LEARNING_RATE = 0.01                #changed for BERT
 CELL_STATE_CLAMP_VAL = 1e4
 HIDDEN_STATE_CLAMP_VAL = 1e6
 
-PREPPED_DATA_PATH = "../data/prepped_dataset.pickle"
+# use one of theses file names for training from scratch use any of these
+#prepped_dataset_bioBert.pickle
+#prepped_dataset_sciBert.pickle
+#prepped_dataset_Bert.pickle
+PREPPED_DATA_PATH = "../data/prepped_dataset_bioBert.pickle"
+BioBERT_DATA_PATH = "../data/biobert_v1.1_pubmed/vocab.txt"
 XML_PATH = "../data/BioInfer_corpus_1.1.1.xml"
 
 WORD_EMBEDDING_DIM = 768                        #changed for BERT
@@ -26,7 +31,7 @@ EXCLUDE_SAMPLES = [
 ]
 
 # options are bert, from-scratch
-ENCODING_METHOD = "bert"                #changed for BERT
+ENCODING_METHOD = "bio-bert"                #changed for BERT
 FREEZE_BERT_EPOCH = 2
 
 VAL_DIMS = False
