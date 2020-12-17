@@ -160,7 +160,7 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
 
     trainer.fit(model, train_data_loader, val_data_loader)
 
-    test_results = trainer.test(test_dataloaders=test_data_loader)
+    test_results = trainer.test(model,test_dataloaders=test_data_loader)
     print(test_results)
 
 def parse_args(args):
