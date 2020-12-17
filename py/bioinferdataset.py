@@ -118,9 +118,22 @@ class BioInferDataset(Dataset):
         self.element_to_idx = {elements[i]: i for i in range(len(elements))}
         self.schema = self.get_schema(self.parser, self.element_to_idx)
         self.inverse_schema = self.invert_schema(self.schema)
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            "allenai/scibert_scivocab_uncased"
-        )
+        self.tokenizer = self.tokenizer_selection()
+
+    def tokenizer_selection(self):
+        if ENCODING_METHOD == "sci-bert":
+            tokenizer = AutoTokenizer.from_pretrained(
+            "allenai/scibert_scivocab_uncased")
+            print("Sci-Bert Data Prep")
+        elif ENCODING_METHOD == "bio-bert":
+            tokenizer = BertTokenizer(vocab_file='../data/biobert_v1.1_pubmed/vocab.txt', 
+            do_lower_case=True)
+            print("Bio-Bert Data Prep")
+        else:
+            tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+            print("From Scratch and Bert Data Prep")
+        
+        return tokenizer
 
     def __len__(self):
         return len(self.sample_list)

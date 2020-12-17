@@ -10,10 +10,16 @@ MAX_LAYERS = 2
 MAX_ENTITY_TOKENS = 5
 LEARNING_RATE = 0.01                #changed for BERT
 
-PREPPED_DATA_PATH = "../data/prepped_dataset.pickle"
+# use one of theses file names for training from scratch use any of these
+#prepped_dataset_bioBert.pickle
+#prepped_dataset_sciBert.pickle
+#prepped_dataset_Bert.pickle
+PREPPED_DATA_PATH = "../data/prepped_dataset_Bert.pickle"
+BioBERT_DATA_PATH = "../data/biobert_v1.1_pubmed/vocab.txt"
 XML_PATH = "../data/BioInfer_corpus_1.1.1.xml"
 
-WORD_EMBEDDING_DIM = 256                        #changed for BERT
+
+WORD_EMBEDDING_DIM = 768                        #changed for BERT
 BLSTM_OUT_DIM = 2 * WORD_EMBEDDING_DIM
 HIDDEN_DIM_BERT = 768
 # MASK_PREVIOUS_ARGS = False
@@ -24,6 +30,6 @@ EXCLUDE_SAMPLES = [
 
 # options are bert, from-scratch
 FREEZE_BERT_EPOCH = 2
-ENCODING_METHOD = "from-scratch"                #changed for BERT
+ENCODING_METHOD = "bert"                #changed for BERT
 
 VAL_DIMS = False

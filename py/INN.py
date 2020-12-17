@@ -5,6 +5,7 @@ from torch import nn
 from torch.nn import functional as functional
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from transformers import *
+from collections import OrderedDict
 
 from config import *
 from constants import *
@@ -82,16 +83,64 @@ class BERTEncoder(pl.LightningModule):
         super().__init__()
         self.freeze_bert_epoch = freeze_bert_epoch
         print('loading pretrained BERT...')
-        self.bert_config = AutoConfig.from_pretrained(
-            "allenai/scibert_scivocab_uncased"
-        )
+        # self.bert_config = AutoConfig.from_pretrained(
+        #     "allenai/scibert_scivocab_uncased"
+        # )
+        # self.output_bert_hidden_states = output_bert_hidden_states
+        # if self.output_bert_hidden_states:
+        #     self.bert_config.output_hidden_states = output_bert_hidden_states
+        # self.bert = AutoModel.from_pretrained(
+        #     "allenai/scibert_scivocab_uncased", config=self.bert_config
+        # )
+        # self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
+
         self.output_bert_hidden_states = output_bert_hidden_states
-        if self.output_bert_hidden_states:
-            self.bert_config.output_hidden_states = output_bert_hidden_states
-        self.bert = AutoModel.from_pretrained(
+        if ENCODING_METHOD == "sci-bert":
+            # self.bert_config = AutoConfig.from_pretrained(
+            #     "allenai/scibert_scivocab_uncased"
+            # )
+            # self.output_bert_hidden_states = output_bert_hidden_states
+            # if self.output_bert_hidden_states:
+            #     self.bert_config.output_hidden_states = output_bert_hidden_states
+            # self.bert = AutoModel.from_pretrained(
+            #     "allenai/scibert_scivocab_uncased", config=self.bert_config
+            # )
+            # self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
+
+            self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
+            self.bert_config = AutoConfig.from_pretrained("allenai/scibert_scivocab_uncased")
+            if self.output_bert_hidden_states:
+                self.bert_config.output_hidden_states = output_bert_hidden_states
+            self.bert = AutoModel.from_pretrained(
             "allenai/scibert_scivocab_uncased", config=self.bert_config
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
+            )
+            print("Using Sci-Bert for Embedding")
+        elif ENCODING_METHOD == "bio-bert":
+            self.tokenizer = BertTokenizer(vocab_file='../data/biobert_v1.1_pubmed/vocab.txt', do_lower_case=True)
+            self.bert_config = BertConfig.from_json_file('../data/biobert_v1.1_pubmed//config.json')
+            tmp_d = torch.load('../data/biobert_v1.1_pubmed/pytorch_model.bin', map_location=self.device)
+            state_dict = OrderedDict()
+
+            for i in list(tmp_d.keys())[:199]:
+                x = i
+                if i.find('bert') > -1:
+                    x = '.'.join(i.split('.')[1:])
+                state_dict[x] = tmp_d[i]
+
+            if self.output_bert_hidden_states:
+                self.bert_config.output_hidden_states = output_bert_hidden_states
+            self.bert = BertModel(self.bert_config)
+            self.bert.load_state_dict(state_dict, strict=False)
+            print("Using bio-Bert for Embedding")
+        elif ENCODING_METHOD == "bert":
+            self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+            self.bert_config = AutoConfig.from_pretrained('bert-base-uncased')
+            if self.output_bert_hidden_states:
+                self.bert_config.output_hidden_states = output_bert_hidden_states
+            self.bert = AutoModel.from_pretrained(
+                "bert-base-uncased", config=self.bert_config
+            )
+            print("Using Bert for Embedding")
 
     @staticmethod
     def parse_bert(seq_original, offset_mapping):
@@ -177,7 +226,8 @@ class INNModel(pl.LightningModule):
         self.encoding_method = encoding_method
         self.output_bert_hidden_states = output_bert_hidden_states
 
-        if self.encoding_method == "bert":
+        methods = ["bert", "sci-bert","bio-bert"]
+        if self.encoding_method in methods:
             self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch)
             self.linear_in_dim = self.hidden_dim_bert
         else:
@@ -250,7 +300,8 @@ class INNModel(pl.LightningModule):
         epoch,
     ):
         encoding_out = None
-        if self.encoding_method == "bert":
+        methods = ["bert", "sci-bert","bio-bert"]
+        if self.encoding_method in methods:
             encoding_out, token_splits = self.encoder(bert_tokens, mask,text,epoch)
         elif self.encoding_method == "from-scratch":
             encoding_out, token_splits = self.encoder(tokens)
@@ -318,7 +369,8 @@ class INNModelLightning(pl.LightningModule):
     ):
         super().__init__()
         self.encoding_method = encoding_method
-        if self.encoding_method == "bert":
+        methods = ["bert", "sci-bert","bio-bert"]
+        if self.encoding_method in methods:
             encoding_dim = hidden_dim_bert
         else:
             encoding_dim = 2 * word_embedding_dim
