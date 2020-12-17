@@ -282,12 +282,12 @@ class INNModel(pl.LightningModule):
             PRED_TRUE if v == 1 else PRED_FALSE for v in labels
         ]
         predictions = torch.stack(predictions).to(self.device)
-        predictions.requires_grad_()
+        # predictions.requires_grad_()
         gold_predictions = torch.stack(gold_predictions).to(self.device)
 
         for layer in torch.unique(L):
             if layer > 0:
-                predictions = predictions.clone()
+                # predictions = predictions.clone()
                 parent_mask = self._get_parent_mask(L, layer, element_names, is_entity)
                 element_embeddings = self.element_embeddings(element_names[parent_mask])
                 s = S[parent_mask, :]
