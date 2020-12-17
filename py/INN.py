@@ -9,6 +9,7 @@ from transformers import *
 from config import *
 from constants import *
 from daglstmcell import DAGLSTMCell
+from collections import OrderedDict
 
 import re
 
@@ -78,63 +79,163 @@ class FromScratchEncoder(pl.LightningModule):
 
 
 class BERTEncoder(pl.LightningModule):
-    def __init__(self, output_bert_hidden_states, freeze_bert_epoch):
+    def __init__(self, output_bert_hidden_states, freeze_bert_epoch, encoding_method):
         super().__init__()
         self.freeze_bert_epoch = freeze_bert_epoch
         print('loading pretrained BERT...')
-        self.bert_config = AutoConfig.from_pretrained(
-            "allenai/scibert_scivocab_uncased"
-        )
+
         self.output_bert_hidden_states = output_bert_hidden_states
-        if self.output_bert_hidden_states:
-            self.bert_config.output_hidden_states = output_bert_hidden_states
-        self.bert = AutoModel.from_pretrained(
+        if ENCODING_METHOD == "sci-bert":
+            self.tokenizer = AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
+            self.bert_config = AutoConfig.from_pretrained("allenai/scibert_scivocab_uncased")
+            if self.output_bert_hidden_states:
+                self.bert_config.output_hidden_states = output_bert_hidden_states
+            self.bert = AutoModel.from_pretrained(
             "allenai/scibert_scivocab_uncased", config=self.bert_config
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
+            )
+            print("Using Sci-Bert for Embedding")
+        elif ENCODING_METHOD == "bio-bert":
+            self.tokenizer = BertTokenizer(vocab_file='../data/biobert_v1.1_pubmed/vocab.txt', do_lower_case=True)
+            self.bert_config = BertConfig.from_json_file('../data/biobert_v1.1_pubmed//config.json')
+            tmp_d = torch.load('../data/biobert_v1.1_pubmed/pytorch_model.bin', map_location=self.device)
+            state_dict = OrderedDict()
 
-    @staticmethod
-    def parse_bert(seq_original, offset_mapping):
-        word_split_idx = 0
-        word_splits = [len(x) for x in seq_original]
-        len_word_splits = len(word_splits)
-        split_size_counter = 0
+            for i in list(tmp_d.keys())[:199]:
+                x = i
+                if i.find('bert') > -1:
+                    x = '.'.join(i.split('.')[1:])
+                state_dict[x] = tmp_d[i]
 
-        om = offset_mapping[1:]
-        bert_splits = []
+            if self.output_bert_hidden_states:
+                self.bert_config.output_hidden_states = output_bert_hidden_states
+            self.bert = BertModel(self.bert_config)
+            self.bert.load_state_dict(state_dict, strict=False)
+            print("Using bio-Bert for Embedding")
+        elif ENCODING_METHOD == "bert":
+            self.tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+            self.bert_config = AutoConfig.from_pretrained('bert-base-uncased')
+            if self.output_bert_hidden_states:
+                self.bert_config.output_hidden_states = output_bert_hidden_states
+            self.bert = AutoModel.from_pretrained(
+                "bert-base-uncased", config=self.bert_config
+            )
+            print("Using Bert for Embedding")
 
-        for omap in offset_mapping:
-            split_size_counter += 1
-            if omap[1] == word_splits[word_split_idx]:
-                bert_splits.append(split_size_counter)
-                split_size_counter = 0
-                word_split_idx+=1
-                if word_split_idx == len_word_splits:
-                    break
-        return bert_splits
+        
+        
+        #self.tokenizer = AutoTokenizer.from_pretrained('allenai/scibert_scivocab_uncased')
 
-    @staticmethod
-    def bert_new_embedding(bert_encodings,split):
-        return torch.stack([torch.mean(chunk,dim=0) for chunk in torch.split(bert_encodings[0],split)]).unsqueeze(0)
+    # @staticmethod
+    # def parse_bert(seq_original, offset_mapping):
+    #     word_split_idx = 0
+    #     word_splits = [len(x) for x in seq_original]
+    #     len_word_splits = len(word_splits)
+    #     split_size_counter = 0
 
-    def forward(self, bert_tokens, masks, text):
+    #     om = offset_mapping[1:]
+    #     bert_splits = []
+
+    #     for omap in offset_mapping:
+    #         split_size_counter += 1
+    #         if omap[1] == word_splits[word_split_idx]:
+    #             bert_splits.append(split_size_counter)
+    #             split_size_counter = 0
+    #             word_split_idx+=1
+    #             if word_split_idx == len_word_splits:
+    #                 break
+    #     return bert_splits
+
+    def parse_bert(self, seq_original, seq_bert):
+        """
+        """
+
+        def remove_leading_pounds(token):
+            """
+            """
+            token_new = ''
+            for c in token:
+                if c != '#':
+                    token_new += c
+            return token_new
+
+        # Iterate over the original sequence and detect splitted tokens.
+        mapped_indices_list = []
+        j = 0
+        for i in range(len(seq_original)):
+            if seq_original[i] == seq_bert[j]:  # Not splitted.
+                j += 1
+                continue
+            else:  # Detect splitted tokens.
+                start = 0
+                token_splitted = seq_original[i]
+                token_mapping = remove_leading_pounds(seq_bert[j])
+                mapped_indices = []
+                while token_mapping == \
+                        token_splitted[start : start + len(token_mapping)]:
+                    mapped_indices.append(j)
+                    start += len(token_mapping)
+                    j += 1
+                    if j == len(seq_bert):
+                        break
+                    else:
+                        token_mapping = remove_leading_pounds(seq_bert[j])
+                mapped_indices_list.append((i, mapped_indices))
+        return mapped_indices_list
+
+    # @staticmethod
+    # def bert_new_embedding(bert_encodings,split):
+    #     return torch.stack([torch.mean(chunk,dim=0) for chunk in torch.split(bert_encodings[0],split)]).unsqueeze(0)
+
+    def bert_new_embedding(self,bert,split,shape):
+        '''
+        '''
+        j=0
+        k=0
+        bert_new=torch.zeros([1,shape,768])
+        if len(split) != 0:
+            for i in range(len(split)):
+                while k< split[i][0]:
+                    bert_new[:,k,:]=bert[:,j,:]
+                    j += 1
+                    k += 1
+                for p in range(len(split[i][1])):
+                    j += 1
+
+                bert_new[:,k,:] = torch.sum(bert[:,split[i][1],:],dim = 1)/len(split[i][1])
+                k +=1
+            while k < shape:
+                bert_new[:,k,:]=bert[:,j,:]
+                j += 1
+                k += 1
+        else:
+            bert_new = bert
+            
+        return bert_new
+
+    def forward(self, bert_tokens, masks, text,epoch):
         bert_outs = []
         for toks, mask, txt in zip(bert_tokens, masks, text):
-            bert_out = self.bert(toks, attention_mask=mask)[0]
+            if(epoch < FREEZE_BERT_EPOCH):
+                bert_out = self.bert(toks, attention_mask=mask)[0]
+            else:
+                with torch.no_grad():
+                    bert_out = self.bert(toks, attention_mask=mask)[0]
 
             a = torch.sum(mask)
             seq_original = [w.lower() for w in txt.split(' ')]
-            om = self.tokenizer.encode_plus(seq_original,  # the sentence to be encoded
-                            add_special_tokens=True,  # Add [CLS] and [SEP]
-                            pad_to_max_length=True,  # Add [PAD]s
-                            is_split_into_words=True,
-                            return_attention_mask = False,
-                            return_offsets_mapping=True,
-                            return_length=False)['offset_mapping'][1:]
+            # om = self.tokenizer.encode_plus(seq_original,  # the sentence to be encoded
+            #                 add_special_tokens=True,  # Add [CLS] and [SEP]
+            #                 pad_to_max_length=True,  # Add [PAD]s
+            #                 is_split_into_words=True,
+            #                 return_attention_mask = False,
+            #                 return_offsets_mapping=True,
+            #                 return_length=False)['offset_mapping'][1:]
+            # print(om)
+            om = self.tokenizer.tokenize(txt)
             splits = self.parse_bert(seq_original, om)
             bert_out = bert_out[:,0:a,:]
             bert_out = bert_out[:,1:-1,:]
-            bert_out = self.bert_new_embedding(bert_out,splits)
+            bert_out = self.bert_new_embedding(bert_out,splits,len(seq_original))
             bert_out = bert_out.permute(1, 0, 2)
             bert_outs.append(bert_out)
 
@@ -172,9 +273,9 @@ class INNModel(pl.LightningModule):
         self.hidden_dim_bert = hidden_dim_bert
         self.encoding_method = encoding_method
         self.output_bert_hidden_states = output_bert_hidden_states
-
-        if self.encoding_method == "bert":
-            self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch)
+        methods = ["bert", "sci-bert","bio-bert"]
+        if self.encoding_method in methods:
+            self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch,self.encoding_method)
             self.linear_in_dim = self.hidden_dim_bert
         else:
             self.encoder = FromScratchEncoder(vocab_dict, word_embedding_dim)
@@ -246,7 +347,8 @@ class INNModel(pl.LightningModule):
         epoch,
     ):
         encoding_out = None
-        if self.encoding_method == "bert":
+        methods = ["bert", "sci-bert","bio-bert"]
+        if self.encoding_method in methods:
             encoding_out, token_splits = self.encoder(bert_tokens, mask,text,epoch)
         elif self.encoding_method == "from-scratch":
             encoding_out, token_splits = self.encoder(tokens)
