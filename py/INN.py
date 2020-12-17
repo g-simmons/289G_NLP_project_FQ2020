@@ -1,5 +1,6 @@
 import pytorch_lightning as pl
 from pytorch_lightning import metrics
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as functional
@@ -530,9 +531,28 @@ class INNModelLightning(pl.LightningModule):
         self._log_epoch_end_performance_sample_avg(val_step_outputs,prefix='val')
         self._log_epoch_end_performance_full_set_avg(val_step_outputs,prefix='val')
 
+    def _log_epoch_end_performance_layerwise(self, step_outputs, prefix):
+        batch_labels_layerwise = {}
+        predicted_probs_layerwise = {}
+        for layer in range(1, 3):
+            batch_labels_layerwise[layer] = []
+            predicted_probs_layerwise[layer] = []
+            for predicted_probs, sample in step_outputs:
+                idx = sample["L"] == layer
+                if len(sample["labels"][idx]) > 0:
+                    batch_labels_layerwise[layer].append({"labels": sample["labels"][idx]})
+                if len(predicted_probs[idx]) > 0:
+                    predicted_probs_layerwise[layer].append(predicted_probs[idx])
+
+        for i, layer in enumerate(range(1, 3)):
+            step_outs = [i for i in zip(predicted_probs_layerwise[layer], batch_labels_layerwise[layer])]
+            self._log_epoch_end_performance_full_set_avg(step_outs,prefix=f'{prefix}_layer_{i}')
+            self._log_epoch_end_performance_sample_avg(step_outs,prefix=f'{prefix}_layer_{i}')
+
     def test_epoch_end(self, test_step_outputs):
         self._log_epoch_end_performance_sample_avg(test_step_outputs,prefix='test')
         self._log_epoch_end_performance_full_set_avg(test_step_outputs,prefix='test')
+        self._log_epoch_end_performance_layerwise(test_step_outputs,prefix='test')
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adadelta(self.parameters(), lr=self.lr)
