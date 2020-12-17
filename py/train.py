@@ -120,7 +120,7 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         freeze_bert_epoch=freeze_bert_epoch,
         nll_positive_weight=nll_positive_weight,
         guided_training=guided_training,
-        check_arguments=check_arguments.
+        check_arguments=check_arguments,
     )
 
     wandb_config = {
