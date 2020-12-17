@@ -78,7 +78,7 @@ def get_sample_avg_distribution(dataset):
 
     return percent_ones
 
-def train(run_name, encoding_method, learning_rate, batch_size, guided_training, epochs, freeze_bert_epoch, nll_positive_weight):
+def train(run_name, encoding_method, learning_rate, batch_size, guided_training, epochs, freeze_bert_epoch, nll_positive_weight, check_arguments):
     """Train an INN model and log the training info to wandb.
 
     Args:
@@ -119,7 +119,8 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         learning_rate=learning_rate,
         freeze_bert_epoch=freeze_bert_epoch,
         nll_positive_weight=nll_positive_weight,
-        guided_training=guided_training
+        guided_training=guided_training,
+        check_arguments=check_arguments.
     )
 
     wandb_config = {
@@ -134,7 +135,8 @@ def train(run_name, encoding_method, learning_rate, batch_size, guided_training,
         "freeze_BERT_epoch": freeze_bert_epoch,
         "encoding_method": encoding_method,
         "nll_positive_weight": nll_positive_weight,
-        "guided_training": guided_training
+        "guided_training": guided_training,
+        "check_arguments": check_arguments,
     }
 
     wandb_logger = WandbLogger(
@@ -208,11 +210,19 @@ def parse_args(args):
         default='1',
         type=float
     )
+    parser.add_argument(
+        '-C', '--check-arguments',
+        nargs='?',
+        default='1',
+        type=float
+    )
     parser.add_argument('--guided-training', dest='guided_training', action='store_true')
+    parser.set_defaults(guided_training=False)
+    parser.add_argument('--check-arguments', dest='check-arguments', action='store_true')
     parser.set_defaults(guided_training=False)
 
     return parser.parse_args(args)
 
 if __name__ == '__main__':
     args = parse_args(sys.argv[1:])
-    train(args.name, args.encoding_method, args.learning_rate, args.batch_size, args.guided_training, args.epochs, args.freeze_bert_epoch, args.nll_positive_weight)
+    train(args.name, args.encoding_method, args.learning_rate, args.batch_size, args.guided_training, args.epochs, args.freeze_bert_epoch, args.nll_positive_weight,args.check_arguments)

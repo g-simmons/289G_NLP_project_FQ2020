@@ -166,7 +166,8 @@ class INNModel(pl.LightningModule):
         hidden_dim_bert,
         cell,
         freeze_bert_epoch,
-        guided_training
+        guided_training,
+        check_arguments,
     ):
         super().__init__()
         self.word_embedding_dim = word_embedding_dim
@@ -174,6 +175,7 @@ class INNModel(pl.LightningModule):
         self.encoding_method = encoding_method
         self.guided_training = guided_training
         self.output_bert_hidden_states = output_bert_hidden_states
+        self.check_arguments = check_arguments
 
         if self.encoding_method == "bert":
             self.encoder = BERTEncoder(self.output_bert_hidden_states,freeze_bert_epoch)
@@ -278,6 +280,9 @@ class INNModel(pl.LightningModule):
         predictions = [
             PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
         ]
+        prev_predictions = [
+            PRED_TRUE if is_entity[i] == 1 else PRED_FALSE for i in range(0, T.shape[0])
+        ]
         gold_predictions = [
             PRED_TRUE if v == 1 else PRED_FALSE for v in labels
         ]
@@ -300,7 +305,21 @@ class INNModel(pl.LightningModule):
                 C[parent_mask, :] = c
                 logits = self.output_linear(H[parent_mask, :])
                 sm_logits = functional.softmax(logits, dim=1)
-                predictions[parent_mask, :] = sm_logits
+
+
+                if self.check_arguments:
+                    if self.guided_training:
+                        arg_pos_probs = torch.prod(gold_predictions[s][:,:,1],dim=1)
+                    else:
+                        arg_pos_probs = torch.prod(prev_predictions[s][:,:,1],dim=1)
+                    arg_probs = functional.gumbel_softmax(torch.stack([1-arg_pos_probs, arg_pos_probs]).transpose(1,0),dim=1,tau=0.1)
+                    corrected_logits = torch.mul(logits,arg_probs)
+                    sm_corrected_logits = functional.softmax(corrected_logits, dim=1)
+                    prev_predictions[parent_mask, :] = sm_corrected_logits
+                    pred_vals = torch.clamp(sm_corrected_logits,min=1e-9)
+                else:
+                    pred_vals = sm_logits
+                predictions[parent_mask, :] = pred_vals
 
         return predictions
 
@@ -318,7 +337,8 @@ class INNModelLightning(pl.LightningModule):
         learning_rate,
         freeze_bert_epoch,
         nll_positive_weight,
-        guided_training
+        guided_training,
+        check_arguments,
     ):
         super().__init__()
         self.encoding_method = encoding_method
@@ -342,7 +362,8 @@ class INNModelLightning(pl.LightningModule):
             word_embedding_dim=word_embedding_dim,
             cell=self.cell,
             freeze_bert_epoch=freeze_bert_epoch,
-            guided_training=self.guided_training
+            guided_training=self.guided_training,
+            check_arguments=check_arguments
         )
         self.nll_positive_weight = nll_positive_weight
 
