@@ -527,31 +527,28 @@ class INNModelLightning(pl.LightningModule):
         self._log_epoch_end_performance_sample_avg(val_step_outputs,prefix='val')
         self._log_epoch_end_performance_full_set_avg(val_step_outputs,prefix='val')
 
-    def test_epoch_end(self, test_step_outputs):
-        # TODO:
-        #   Change here if num_layer changes.
+    def _log_epoch_end_performance_layerwise(self, step_outputs, prefix):
+        batch_labels_layerwise = {}
+        predicted_probs_layerwise = {}
         for layer in range(1, 3):
-            predictions_layer = []
-            labels_layer = []
-            for batch in val_step_outputs:
-                L_batch = batch[1]['L']
-                for i in range(len(L_batch)):
-                    if L_batch[i] == layer:
-                        predictions_layer.append(batch[0][i].detach().cpu().numpy())
-                        labels_layer.append(batch[1]['labels'][i].detach().cpu().numpy())
-            predictions_layer = torch.from_numpy(np.array(predictions_layer)).to(self.device)
-            labels_layer = torch.from_numpy(np.array(labels_layer)).to(self.device)
-            predictions_layer.requires_grad = True
-            loss, metrics, _, _, _ = self._calculate_step_metrics_and_loss(
-                predictions_layer,
-                labels_layer,
-                batch_size=len(predictions_layer),
-                prefix='layer_{}'.format(layer),
-                avg_strategy='batch')
-            print(loss)
+            batch_labels_layerwise[layer] = []
+            predicted_probs_layerwise[layer] = []
+            for predicted_probs, sample in step_outputs:
+                idx = sample["L"] == layer
+                if len(sample["labels"][idx]) > 0:
+                    batch_labels_layerwise[layer].append({"labels": sample["labels"][idx]})
+                if len(predicted_probs[idx]) > 0:
+                    predicted_probs_layerwise[layer].append(predicted_probs[idx])
 
+        for i, layer in enumerate(range(1, 3)):
+            step_outs = [i for i in zip(predicted_probs_layerwise[layer], batch_labels_layerwise[layer])]
+            self._log_epoch_end_performance_full_set_avg(step_outs,prefix=f'{prefix}_layer_{i}')
+            self._log_epoch_end_performance_sample_avg(step_outs,prefix=f'{prefix}_layer_{i}')
+
+    def test_epoch_end(self, test_step_outputs):
         self._log_epoch_end_performance_sample_avg(test_step_outputs,prefix='test')
         self._log_epoch_end_performance_full_set_avg(test_step_outputs,prefix='test')
+        self._log_epoch_end_performance_layerwise(test_step_outputs,prefix='test')
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adadelta(self.parameters(), lr=self.lr)
