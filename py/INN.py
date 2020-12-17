@@ -117,10 +117,14 @@ class BERTEncoder(pl.LightningModule):
     def bert_new_embedding(bert_encodings,split):
         return torch.stack([torch.mean(chunk,dim=0) for chunk in torch.split(bert_encodings[0],split)]).unsqueeze(0)
 
-    def forward(self, bert_tokens, masks, text):
+    def forward(self, bert_tokens, masks, text, epoch):
         bert_outs = []
         for toks, mask, txt in zip(bert_tokens, masks, text):
-            bert_out = self.bert(toks, attention_mask=mask)[0]
+            if(epoch < FREEZE_BERT_EPOCH):
+                bert_out = self.bert(toks, attention_mask=mask)[0]
+            else:
+                with torch.no_grad():
+                    bert_out = self.bert(toks, attention_mask=mask)[0]
 
             a = torch.sum(mask)
             seq_original = [w.lower() for w in txt.split(' ')]
