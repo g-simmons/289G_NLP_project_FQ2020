@@ -210,16 +210,11 @@ def parse_args(args):
         default='1',
         type=float
     )
-    parser.add_argument(
-        '-C', '--check-arguments',
-        nargs='?',
-        default='1',
-        type=float
-    )
     parser.add_argument('--guided-training', dest='guided_training', action='store_true')
     parser.set_defaults(guided_training=False)
+
     parser.add_argument('--check-arguments', dest='check-arguments', action='store_true')
-    parser.set_defaults(guided_training=False)
+    parser.set_defaults(check_arguments=False)
 
     return parser.parse_args(args)
 
