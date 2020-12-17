@@ -1,5 +1,6 @@
 import pytorch_lightning as pl
 from pytorch_lightning import metrics
+import numpy as np
 import torch
 from torch import nn
 from torch.nn import functional as functional
@@ -527,6 +528,28 @@ class INNModelLightning(pl.LightningModule):
         self._log_epoch_end_performance_full_set_avg(val_step_outputs,prefix='val')
 
     def test_epoch_end(self, test_step_outputs):
+        # TODO:
+        #   Change here if num_layer changes.
+        for layer in range(1, 3):
+            predictions_layer = []
+            labels_layer = []
+            for batch in val_step_outputs:
+                L_batch = batch[1]['L']
+                for i in range(len(L_batch)):
+                    if L_batch[i] == layer:
+                        predictions_layer.append(batch[0][i].detach().cpu().numpy())
+                        labels_layer.append(batch[1]['labels'][i].detach().cpu().numpy())
+            predictions_layer = torch.from_numpy(np.array(predictions_layer)).to(self.device)
+            labels_layer = torch.from_numpy(np.array(labels_layer)).to(self.device)
+            predictions_layer.requires_grad = True
+            loss, metrics, _, _, _ = self._calculate_step_metrics_and_loss(
+                predictions_layer,
+                labels_layer,
+                batch_size=len(predictions_layer),
+                prefix='layer_{}'.format(layer),
+                avg_strategy='batch')
+            print(loss)
+
         self._log_epoch_end_performance_sample_avg(test_step_outputs,prefix='test')
         self._log_epoch_end_performance_full_set_avg(test_step_outputs,prefix='test')
 
